@@ -107,9 +107,7 @@ class MainActivity : ComponentActivity() {
         com.example.data.matrix.UserRuleRegistry.init(applicationContext)
         com.example.network.WebSocketTradeRelay.init(applicationContext)
 
-        // Initialize local trading relay endpoints (192.168.0.104) and start Bluetooth-style auto-seeking
-        com.example.network.HttpTradeRelay.webhookUrl = com.example.network.HttpTradeRelay.DEFAULT_HTTP_URL
-        com.example.network.WebSocketTradeRelay.serverUrl = com.example.network.WebSocketTradeRelay.DEFAULT_SERVER_URL
+        // Initialize local trading relay endpoints with persisted preferences and start ultra-fast auto-seeking
         com.example.network.WebSocketTradeRelay.start()
 
         setContent {
@@ -409,6 +407,7 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                                 onResetSessionPnl = { viewModel.resetSessionPnl() },
                                 onToggleAutoTrade = { viewModel.toggleAutoTrade() },
                                 onResetTradeLock = { viewModel.resetAutoTradeLock() },
+                                onQuantSignalChanged = { sig, isActive, analysis -> viewModel.onQuantSignalChanged(sig, isActive, analysis) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
@@ -439,6 +438,7 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                                 onResetSessionPnl = { viewModel.resetSessionPnl() },
                                 onToggleAutoTrade = { viewModel.toggleAutoTrade() },
                                 onResetTradeLock = { viewModel.resetAutoTradeLock() },
+                                onQuantSignalChanged = { sig, isActive, analysis -> viewModel.onQuantSignalChanged(sig, isActive, analysis) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1.64f)

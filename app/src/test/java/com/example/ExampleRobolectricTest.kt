@@ -235,10 +235,12 @@ class ExampleRobolectricTest {
     assertTrue("U024 must be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U024"))
     assertTrue("D024 must be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("D024"))
 
-    // Verify Medium rules do NOT have default checkmarks (user manual verify)
-    org.junit.Assert.assertFalse("U005 (Medium) should not be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U005"))
+    // Verify Medium rules are pre-verified by default for 100% auto-trade execution per system architecture
+    assertTrue("U005 (Medium) should be verified by default for 100% auto-trade readiness", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U005"))
 
-    // Verify user can manually toggle verify
+    // Verify user can manually toggle verify off and on
+    com.example.data.matrix.UserRuleRegistry.setRuleVerified("U005", false)
+    org.junit.Assert.assertFalse("U005 should be unverified after user explicitly unticks it", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U005"))
     com.example.data.matrix.UserRuleRegistry.setRuleVerified("U005", true)
     assertTrue("U005 should now be verified after user marks it", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U005"))
   }

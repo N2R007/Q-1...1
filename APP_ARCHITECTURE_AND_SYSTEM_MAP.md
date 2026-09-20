@@ -313,7 +313,14 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
 - Renders the root Compose container with edge-to-edge support.
 
 ### 2. `MainViewModel.kt`
-- Holds `_uiState: MutableStateFlow<TradingUiState>`.
+- Holds `_uiState: MutableStateFlow<AnalyzerUiState>`.
+- Tracks `_quantActiveSignal` and `_isQuantSignalActive`, 100% synchronized with the QUANT section's right-hand signal button.
+- **Strict QUANT Signal Auto-Trade Gating (User Mandate)**:
+  - Auto-trade dispatch is strictly blocked unless the right side of the QUANT section displays an active `UP` or `DOWN` signal (`Authorized106MatrixEngine`).
+  - When the QUANT section shows `-Wait` or when the 30-second countdown is inactive/expired, auto-trade execution is 100% prevented.
+  - Legacy secondary matrix fallbacks (`Directional206MatrixEngine`, `analysis.primaryMatrixId`, and fallback to `analysis.direction`) have been eliminated from auto-trade firing.
+  - Verifies that the rule is user-verified with a tick (✓) in `UserRuleRegistry` before dispatch.
+  - Enforces strict single-trade lock (`BURST_DEDUP_WINDOW_MS = 60_000L`) so only one trade fires per signal window.
 - Runs `scanLoopJob` at 20ms interval.
 - Runs `candleClockJob` for 50/50 candle sync.
 - Houses `runAutoMemorySweep()` for heap preservation.
@@ -373,7 +380,7 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
   - `UserRuleRegistry` automatically pre-verifies all 312 system rules (U001-U103, D001-D103, M001-M106) and user custom rules (C001+) for 100% immediate auto-trade execution.
   - Zero dropped signals: Any valid directional rule detected on screen executes immediately unless explicitly unticked by the user.
 - **Dedicated Real-Time Auto-Connection Engine**:
-  - Exclusively dedicated target: `ws://192.168.0.104:8765` (User Laptop WebSocket server).
+  - Exclusively dedicated target: `ws://192.168.0.117:8765` (User Laptop WebSocket server).
   - Auto-discovery cycle interval: **1200ms (1.2s)** continuous background active seek without rotating or polling extraneous endpoints.
   - Ultra-fast connection timeout: 1200ms socket connect timeout with infinite read timeout (`0ms`) ensuring live sockets never prematurely close.
   - Automatic reconnection: Mobile constantly probes and connects to the laptop as soon as the laptop server is online.
@@ -383,16 +390,24 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
   - Automatically captures the trade entry price $P_{\text{entry}}$ and active candle window key (`1-Trade` epoch minute or `2-Trade` 50/50 split $H_1 / H_2$).
   - When the window concludes, compares the closing price $P_{\text{close}}$ against $P_{\text{entry}}$ and automatically resolves `TradeOutcome.PROFIT` (WIN) or `TradeOutcome.LOSS` (LOSS) directly in the Trade Card & Auto-Active History UI.
 - Configured Primary Target:
-  - **WebSocket Server URL**: `ws://192.168.0.104:8765` (User Desktop / Laptop WebSocket server).
-  - **HTTP Webhook Endpoint**: `http://192.168.0.104:5000/trade` (User Desktop / Laptop Flask / FastAPI webhook relay).
+  - **WebSocket Server URL**: `ws://192.168.0.117:8765` (User Desktop / Laptop WebSocket server, persisted in `SharedPreferences`).
+  - **HTTP Webhook Endpoint**: `http://192.168.0.117:5000/trade` (User Desktop / Laptop Flask / FastAPI webhook relay, persisted in `SharedPreferences`).
+- **Instant Persistence & Active Reconnect on Save**:
+  - When the user alters either URL in Settings (`ApiKeyDialog.kt`) or the Auto-Trade Tab (`WebSocketAutoTradeTab.kt`) and clicks "Save", `WebSocketTradeRelay.updateEndpointsAndReconnect()` immediately writes the endpoints to `SharedPreferences` (`quant_trade_relay_prefs`), updates in-memory variables, and executes an instant reconnect with zero delay.
+- **Advanced Auto-Connect & Wi-Fi Network Callback**:
+  - Runs an ultra-fast 1.0s active background scan cycle (`ULTRA_FAST_SEEK_MS = 1000L`).
+  - Registered with Android `ConnectivityManager.NetworkCallback` to detect Wi-Fi/Ethernet status changes and immediately trigger instant probing the moment the local network or laptop server starts.
+- **Strict Single-Trade Per Signal Lock**:
+  - `TradeExecutionDispatcher` and `MainViewModel` enforce strict single-entry locks (`BURST_DEDUP_WINDOW_MS = 60_000L`, `RAPID_SAME_DIRECTION_GUARD_MS = 3000L`).
+  - When an auto-trade fires for a signal, it is locked so that continuous 20ms camera OCR frames will NEVER fire duplicate back-to-back trades for the same signal. Exactly one trade is dispatched per confirmed signal.
 - Dispatches high-speed JSON trade packets with standard polarity: `{"polarity": 1, "action": "BUY", "command": "CLICK_BUY"}` for CALL/BUY and `{"polarity": -1, "action": "SELL", "command": "CLICK_SELL"}` for PUT/SELL.
 - Enforces single-click execution guards and displays live connection status, latency, and logs in the UI.
 
 ### 8. `AutoTradeBridge.kt` (Multi-Mode Connection, Telemetry & Auto-Discovery Manager)
 - Located in `com.example.quantvision.AutoTradeBridge`.
-- Configured Primary Target: `ws://192.168.0.104:8765` (User Laptop Wi-Fi).
+- Configured Primary Target: `ws://192.168.0.117:8765` (User Laptop Wi-Fi).
 - Provides seamless zero-configuration multi-mode auto connection:
-  - **Primary Wi-Fi Mode**: Pre-configured to `ws://192.168.0.104:8765` with automatic subnet sweep if IP changes.
+  - **Primary Wi-Fi Mode**: Pre-configured to `ws://192.168.0.117:8765` with automatic subnet sweep if IP changes.
   - **Mode 1: USB Cable (ADB Reverse / `ws://127.0.0.1:8765`)**: Instant fallback and direct connection mode (`adb reverse tcp:8765 tcp:8765`).
   - **Mode 2: Wi-Fi LAN Dynamic Auto-Discovery**: Automatically resolves local subnet and sweeps port 8765 in parallel across `/24` candidates in under 1 second without requiring manual `ipconfig`.
   - **Mode 3: Mobile Hotspot / SIM Tethering**: Automatically inspects ARP table (`/proc/net/arp`) to locate connected PC client IP on hotspot subnet.

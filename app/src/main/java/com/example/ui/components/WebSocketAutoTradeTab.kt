@@ -172,7 +172,7 @@ fun WebSocketAutoTradeTab(
                             },
                             placeholder = {
                                 Text(
-                                    text = "ws://192.168.0.104:8765",
+                                    text = "ws://192.168.0.117:8765",
                                     fontSize = 12.sp,
                                     color = labelColor.copy(alpha = 0.5f)
                                 )
@@ -208,7 +208,7 @@ fun WebSocketAutoTradeTab(
                             },
                             placeholder = {
                                 Text(
-                                    text = "http://192.168.0.104:5000/trade",
+                                    text = "http://192.168.0.117:5000/trade",
                                     fontSize = 12.sp,
                                     color = labelColor.copy(alpha = 0.5f)
                                 )
@@ -231,7 +231,7 @@ fun WebSocketAutoTradeTab(
 
                     // Helper note
                     Text(
-                        text = "Auto-detects and connects to laptop at ws://192.168.0.104:8765 continuously in real-time.",
+                        text = "Auto-detects and connects to laptop at ws://192.168.0.117:8765 continuously in real-time.",
                         fontSize = 10.sp,
                         color = labelColor,
                         lineHeight = 14.sp
@@ -248,12 +248,10 @@ fun WebSocketAutoTradeTab(
                         Button(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                WebSocketTradeRelay.serverUrl = inputUrl
-                                HttpTradeRelay.webhookUrl = inputWebhookUrl
                                 if (isConnected) {
                                     WebSocketTradeRelay.disconnectByUser()
                                 } else {
-                                    WebSocketTradeRelay.connectByUser()
+                                    WebSocketTradeRelay.updateEndpointsAndReconnect(inputUrl, inputWebhookUrl)
                                     if (!isAutoTradeEnabled) {
                                         onToggleAutoTrade()
                                     }
@@ -293,9 +291,7 @@ fun WebSocketAutoTradeTab(
                         Surface(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                WebSocketTradeRelay.serverUrl = inputUrl
-                                HttpTradeRelay.webhookUrl = inputWebhookUrl
-                                WebSocketTradeRelay.connectByUser()
+                                WebSocketTradeRelay.updateEndpointsAndReconnect(inputUrl, inputWebhookUrl)
                             },
                             modifier = Modifier
                                 .size(46.dp)
@@ -494,7 +490,7 @@ fun WebSocketAutoTradeTab(
                                     color = labelColor
                                 )
                                 Text(
-                                    text = "[09:52:46] Connection error: Failed to connect to /192.168.0.104:8765 • Auto-reconnecting...",
+                                    text = "[09:52:46] Connection error: Failed to connect to /192.168.0.117:8765 • Auto-reconnecting...",
                                     fontSize = 9.5.sp,
                                     fontFamily = FontFamily.Monospace,
                                     color = Color(0xFFF87171)

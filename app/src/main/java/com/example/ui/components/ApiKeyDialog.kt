@@ -437,7 +437,7 @@ fun ApiKeyDialog(
                         },
                         placeholder = {
                             Text(
-                                text = "http://192.168.0.104:5000/trade",
+                                text = "http://192.168.0.117:5000/trade",
                                 fontSize = 12.sp,
                                 color = inactiveTextColor.copy(alpha = 0.5f)
                             )
@@ -487,7 +487,7 @@ fun ApiKeyDialog(
                         },
                         placeholder = {
                             Text(
-                                text = "ws://192.168.0.104:8765",
+                                text = "ws://192.168.0.117:8765",
                                 fontSize = 12.sp,
                                 color = inactiveTextColor.copy(alpha = 0.5f)
                             )
@@ -512,8 +512,7 @@ fun ApiKeyDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    HttpTradeRelay.webhookUrl = webhookUrlText
-                    WebSocketTradeRelay.serverUrl = wsUrlText
+                    WebSocketTradeRelay.updateEndpointsAndReconnect(wsUrlText, webhookUrlText)
                     onSave(
                         apiKeyText,
                         selectedInterval,

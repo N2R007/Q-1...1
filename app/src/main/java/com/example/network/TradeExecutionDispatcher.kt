@@ -22,8 +22,8 @@ import kotlinx.coroutines.launch
  * Enforces:
  * 1. Single outbound dispatch per CanonicalDecision fingerprint to prevent duplicate signals.
  * 2. Dual-fallback network architecture:
- *    - Primary Communication: WebSocket (ws://192.168.0.104:8765) for lowest latency (<5ms).
- *    - Secondary Communication: HTTP POST Webhook (http://192.168.0.104:5000/trade) as an immediate fallback.
+ *    - Primary Communication: WebSocket (ws://192.168.0.117:8765) for lowest latency (<5ms).
+ *    - Secondary Communication: HTTP POST Webhook (http://192.168.0.117:5000/trade) as an immediate fallback.
  *    - Execution Logic: Attempts transmission via WebSocket. If WebSocket is disconnected or times out
  *      (>500ms), it immediately and asynchronously sends an HTTP POST to Webhook without blocking UI.
  * 3. Strict validation of executionEligibility before dispatch.
@@ -94,11 +94,11 @@ object TradeExecutionDispatcher {
     @Volatile
     private var lastManualCommand: String? = null
 
-    // Burst single-entry window for the exact same fingerprint (protects against multi-firing during continuous 10ms OCR frames)
-    private const val BURST_DEDUP_WINDOW_MS = 2000L
+    // Burst single-entry protection: identical fingerprint is strictly locked for 1 single trade per signal.
+    private const val BURST_DEDUP_WINDOW_MS = 60_000L
 
-    // Optical micro-jitter debounce between different trades in same direction (500ms prevents broker double-clicks while allowing rapid verified trades)
-    private const val RAPID_SAME_DIRECTION_GUARD_MS = 500L
+    // Optical micro-jitter debounce between different trades in same direction (3000ms prevents broker double-clicks while allowing rapid verified trades)
+    private const val RAPID_SAME_DIRECTION_GUARD_MS = 3000L
 
     // Single-Click Protection Guard for manual button clicks (1500ms prevents broker double-clicks)
     private const val MANUAL_CLICK_DEBOUNCE_MS = 1500L
@@ -132,8 +132,8 @@ object TradeExecutionDispatcher {
 
     /**
      * Dispatches a CanonicalDecision using strict single-outbound execution.
-     * Primary: WebSocket (ws://192.168.0.104:8765) for instant single click (<5ms).
-     * Fallback: HTTP Webhook (http://192.168.0.104:5000/trade) ONLY if WebSocket is disconnected or send fails.
+     * Primary: WebSocket (ws://192.168.0.117:8765) for instant single click (<5ms).
+     * Fallback: HTTP Webhook (http://192.168.0.117:5000/trade) ONLY if WebSocket is disconnected or send fails.
      * Guaranteed: Exactly ONE entry per trade signal.
      */
     fun dispatchDecision(
@@ -177,17 +177,16 @@ object TradeExecutionDispatcher {
         val fp = decision.fingerprint
         val now = System.currentTimeMillis()
 
-        // 1. Burst Single-Entry Protection:
-        // Continuous 10ms camera frames dispatch only ONCE within the burst window (2000ms).
-        // Prevents repeat invocation on the exact same static camera frame while allowing the trade to fire.
-        val isRecentSameFingerprint = (fp == lastDispatchedFingerprint) && ((now - lastDispatchedTimeMs) < BURST_DEDUP_WINDOW_MS)
-        if (isRecentSameFingerprint) {
-            Log.d(TAG, "Dispatch suppressed: fingerprint $fp already dispatched within burst window (${now - lastDispatchedTimeMs}ms)")
+        // 1. Strict Single-Entry Protection (Mandatory 1-Trade Per Signal):
+        // Identical fingerprint is strictly executed ONCE. Continuous camera frames will never fire a second trade.
+        val isDuplicateFingerprint = (fp == lastDispatchedFingerprint) && ((now - lastDispatchedTimeMs) < BURST_DEDUP_WINDOW_MS)
+        if (isDuplicateFingerprint) {
+            Log.d(TAG, "Dispatch suppressed: fingerprint $fp already dispatched within window (${now - lastDispatchedTimeMs}ms). Single trade strictly enforced.")
             return false
         }
 
         // 2. Rapid Multi-Click Guard (Same Direction Optical Jitter Protection):
-        // Enforce brief 500ms safety between distinct trades in the same direction to prevent broker double-clicks.
+        // Enforce 3000ms safety between distinct trades in the same direction to prevent broker double-clicks.
         // Genuine direction changes (e.g. UP -> DOWN) bypass this completely and dispatch instantly (0ms latency).
         if (decision.direction == lastDispatchedDirection && (now - lastDispatchedTimeMs) < RAPID_SAME_DIRECTION_GUARD_MS) {
             Log.d(TAG, "Dispatch suppressed: rapid consecutive ${decision.direction} signal within ${RAPID_SAME_DIRECTION_GUARD_MS}ms")
@@ -285,8 +284,8 @@ object TradeExecutionDispatcher {
 
     /**
      * Manual Trade Dispatch for BUY and SELL UI buttons.
-     * Primary: WebSocket (ws://192.168.0.104:8765).
-     * Fallback: HTTP Webhook (http://192.168.0.104:5000/trade) ONLY if WS is disconnected.
+     * Primary: WebSocket (ws://192.168.0.117:8765).
+     * Fallback: HTTP Webhook (http://192.168.0.117:5000/trade) ONLY if WS is disconnected.
      * Guaranteed: Single entry, protected by debouncing.
      */
     fun dispatchManualTrade(

@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Enterprise-grade WebSocket Trade Relay and Logging Manager for Quant Vision AI.
  *
  * Features:
- * 1. Real-time Connection Configuration (desktop IP address, e.g., ws://192.168.0.104:8765)
+ * 1. Real-time Connection Configuration (desktop IP address, e.g., ws://192.168.0.117:8765)
  * 2. Connect / Disconnect toggle with reactive StateFlow status (Green = Connected, Red = Disconnected)
  * 3. Resilient auto-reconnect loop on connection drops
  * 4. Instant manual & automated signal payload dispatch: "UP" / "CLICK_BUY" and "DOWN" / "CLICK_SELL"
@@ -37,9 +37,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 object WebSocketTradeRelay {
 
     private const val TAG = "WebSocketTradeRelay"
-    const val DEFAULT_SERVER_URL = "ws://192.168.0.104:8765"
-    // Ultra-Fast Zero-Lag Auto-Discovery Interval (1.2s active scan cycle)
-    private const val ULTRA_FAST_SEEK_MS = 1200L
+    const val DEFAULT_SERVER_URL = "ws://192.168.0.117:8765"
+    // Ultra-Fast Zero-Lag Auto-Discovery Interval (1.0s active scan cycle)
+    private const val ULTRA_FAST_SEEK_MS = 1000L
+
+    private const val PREFS_NAME = "quant_trade_relay_prefs"
+    private const val KEY_WS_URL = "saved_ws_url"
+    private const val KEY_WEBHOOK_URL = "saved_webhook_url"
 
     enum class AutoConnectState {
         CONNECTED, // 🟢 Connected to desktop server
@@ -93,7 +97,7 @@ object WebSocketTradeRelay {
 
     /**
      * Dedicated target endpoint:
-     * Exclusively locks onto user desktop server at ws://192.168.0.104:8765.
+     * Exclusively locks onto user desktop server at ws://192.168.0.117:8765.
      * Continuously searches and auto-connects as soon as the server is reachable.
      */
     fun getCandidateEndpoints(): List<String> {
@@ -103,7 +107,98 @@ object WebSocketTradeRelay {
     }
 
     fun init(context: android.content.Context) {
-        appContext = context.applicationContext
+        val ctx = context.applicationContext
+        appContext = ctx
+        loadPersistedUrls(ctx)
+        registerNetworkCallback(ctx)
+    }
+
+    private fun loadPersistedUrls(ctx: android.content.Context) {
+        try {
+            val prefs = ctx.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            val savedWs = prefs.getString(KEY_WS_URL, null)?.trim()
+            if (!savedWs.isNullOrBlank()) {
+                val sanitized = NetworkUrlSanitizer.sanitizeWebSocketUrl(savedWs)
+                if (sanitized.isNotBlank()) {
+                    serverUrl = sanitized
+                }
+            }
+            val savedWebhook = prefs.getString(KEY_WEBHOOK_URL, null)?.trim()
+            if (!savedWebhook.isNullOrBlank()) {
+                val sanitized = NetworkUrlSanitizer.sanitizeHttpWebhookUrl(savedWebhook)
+                if (sanitized.isNotBlank()) {
+                    HttpTradeRelay.webhookUrl = sanitized
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error loading saved relay endpoints: ${e.message}")
+        }
+    }
+
+    /**
+     * Updates trade relay endpoints, permanently saves them to SharedPreferences,
+     * and instantly reconnects to the new WebSocket server without delay.
+     */
+    fun updateEndpointsAndReconnect(
+        newWsUrl: String,
+        newWebhookUrl: String,
+        context: android.content.Context? = null
+    ) {
+        val targetCtx = context?.applicationContext ?: appContext
+        val sanitizedWs = NetworkUrlSanitizer.sanitizeWebSocketUrl(newWsUrl)
+        val sanitizedWebhook = NetworkUrlSanitizer.sanitizeHttpWebhookUrl(newWebhookUrl)
+
+        val effectiveWs = if (sanitizedWs.isNotBlank()) sanitizedWs else DEFAULT_SERVER_URL
+        val effectiveWebhook = if (sanitizedWebhook.isNotBlank()) sanitizedWebhook else HttpTradeRelay.DEFAULT_HTTP_URL
+
+        serverUrl = effectiveWs
+        HttpTradeRelay.webhookUrl = effectiveWebhook
+
+        // Save persistently to SharedPreferences
+        targetCtx?.let { ctx ->
+            try {
+                val prefs = ctx.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString(KEY_WS_URL, effectiveWs)
+                    .putString(KEY_WEBHOOK_URL, effectiveWebhook)
+                    .apply()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error persisting relay endpoints: ${e.message}")
+            }
+        }
+
+        addLog("⚡ [Saved & Activated] WS: $effectiveWs | HTTP: $effectiveWebhook")
+        connectByUser()
+    }
+
+    private var isNetworkCallbackRegistered = false
+
+    private fun registerNetworkCallback(ctx: android.content.Context) {
+        if (isNetworkCallbackRegistered) return
+        try {
+            val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            if (cm != null) {
+                val request = android.net.NetworkRequest.Builder()
+                    .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(request, object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        Log.i(TAG, "Wi-Fi / Network connected, triggering fast auto-seek...")
+                        if (isUserEnabled.get() && !isConnectedAtomic.get()) {
+                            connectByUser()
+                        }
+                    }
+
+                    override fun onLost(network: android.net.Network) {
+                        Log.i(TAG, "Network connection lost")
+                        handleDisconnect()
+                    }
+                })
+                isNetworkCallbackRegistered = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register NetworkCallback: ${e.message}")
+        }
     }
 
     private fun isNetworkAvailable(): Boolean {

@@ -171,6 +171,7 @@ fun TradingDashboardSection(
     onResetSessionPnl: () -> Unit = {},
     onToggleAutoTrade: () -> Unit = {},
     onResetTradeLock: () -> Unit = {},
+    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -251,7 +252,8 @@ fun TradingDashboardSection(
                     onSetInvestmentAmount = onSetInvestmentAmount,
                     onSetTradeOutcome = onSetTradeOutcome,
                     onSetHistoryItemOutcome = onSetHistoryItemOutcome,
-                    onResetSessionPnl = onResetSessionPnl
+                    onResetSessionPnl = onResetSessionPnl,
+                    onQuantSignalChanged = onQuantSignalChanged
                 )
                 1 -> WebSocketAutoTradeTab(
                     isAutoTradeEnabled = uiState.isAutoTradeEnabled,
@@ -272,7 +274,8 @@ fun MainAnalysisTab(
     onSetInvestmentAmount: (Double) -> Unit = {},
     onSetTradeOutcome: (TradeOutcome) -> Unit = {},
     onSetHistoryItemOutcome: (Long, TradeOutcome) -> Unit = { _, _ -> },
-    onResetSessionPnl: () -> Unit = {}
+    onResetSessionPnl: () -> Unit = {},
+    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> }
 ) {
     val analysis = uiState.currentAnalysis
     val executedTrades by TradeExecutionDispatcher.executedTrades.collectAsState()
@@ -333,7 +336,8 @@ fun MainAnalysisTab(
             QuantitativeMetricsGrid(
                 analysis = analysis,
                 history = uiState.history,
-                isAudioAlertEnabled = uiState.isAudioAlertEnabled
+                isAudioAlertEnabled = uiState.isAudioAlertEnabled,
+                onQuantSignalChanged = onQuantSignalChanged
             )
         }
 
@@ -804,7 +808,8 @@ internal fun calculateQuickPrediction(
 fun QuantitativeMetricsGrid(
     analysis: TradingAnalysis?,
     history: List<TradingAnalysis> = emptyList(),
-    isAudioAlertEnabled: Boolean = true
+    isAudioAlertEnabled: Boolean = true,
+    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> }
 ) {
     // 106 Matrix evaluation logic
     val val5m = analysis?.change5mValue
@@ -890,6 +895,11 @@ fun QuantitativeMetricsGrid(
         }
     }
 
+    // Initial sync of active quant signal state
+    LaunchedEffect(Unit) {
+        onQuantSignalChanged(activeSignal, isSignalActive, analysis)
+    }
+
     // Update signal and restart countdown when a new change in 5m or 60m arrives and matches a rule
     LaunchedEffect(evaluatedMatch?.id, evaluatedMatch?.direction, isNewChangeTrigger) {
         if (evaluatedMatch != null && latched5mValue != null && latched60mValue != null) {
@@ -902,6 +912,7 @@ fun QuantitativeMetricsGrid(
             signalTimestamp = now
             isSignalActive = true
             remainingSeconds = 30
+            onQuantSignalChanged(evaluatedMatch, true, analysis)
 
             if (!isDuplicate) {
                 lastAlertedRuleId = evaluatedMatch.id
@@ -922,6 +933,11 @@ fun QuantitativeMetricsGrid(
                     com.example.audio.AudioSignalEngine.playSoundEvent(sound, callout)
                 }
             }
+        } else if (isNewChangeTrigger > 0 && evaluatedMatch == null) {
+            activeSignal = null
+            isSignalActive = false
+            remainingSeconds = 0
+            onQuantSignalChanged(null, false, analysis)
         }
     }
 
@@ -935,6 +951,7 @@ fun QuantitativeMetricsGrid(
                 if (remainingMs <= 0L) {
                     isSignalActive = false
                     remainingSeconds = 0
+                    onQuantSignalChanged(activeSignal, false, analysis)
                     break
                 }
                 remainingSeconds = ((remainingMs + 999L) / 1000L).toInt()

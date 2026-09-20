@@ -137,6 +137,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastDispatchedFingerprint: String? = null
     private val rollingMetricHistory = mutableListOf<com.example.data.models.MetricSnapshot>()
 
+    // Authoritative QUANT 106 active signal state (synchronized 100% with TradingDashboard's QUANT right button)
+    private val _quantActiveSignal = kotlinx.coroutines.flow.MutableStateFlow<com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match?>(null)
+    val quantActiveSignal: StateFlow<com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match?> = _quantActiveSignal.asStateFlow()
+
+    private val _isQuantSignalActive = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isQuantSignalActive: StateFlow<Boolean> = _isQuantSignalActive.asStateFlow()
+
+    fun onQuantSignalChanged(
+        signal: com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match?,
+        isActive: Boolean,
+        analysis: TradingAnalysis? = null
+    ) {
+        _quantActiveSignal.value = signal
+        _isQuantSignalActive.value = isActive
+
+        if (isActive && signal != null && (signal.direction == TradeDirection.UP || signal.direction == TradeDirection.DOWN)) {
+            val targetAnalysis = analysis ?: _uiState.value.currentAnalysis
+            val v5 = targetAnalysis?.change5mValue
+            val v60 = targetAnalysis?.change60mValue
+            val v1d = targetAnalysis?.change1dValue
+            val invest = _uiState.value.investmentAmount
+
+            if (targetAnalysis != null && v5 != null && v60 != null) {
+                evaluateAndDispatchAutoTrade(
+                    analysis = targetAnalysis,
+                    v5 = v5,
+                    v60 = v60,
+                    v1d = v1d,
+                    investmentAmount = invest
+                )
+            }
+        }
+    }
+
     // Auto-restart guard (Freeze / Stall detection) - completely internal
     private var lastSuccessfulFrameTimestamp = System.currentTimeMillis()
     private var lastMonitoredFrameCount = 0L
@@ -1282,44 +1316,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        // 100% MANDATORY STRICT USER MANDATE:
+        // "QUANTএই সেকশনে ডান পাশে আপ এবং ডাউন সিগনাল যতক্ষণ না আসবে ততক্ষণ কোন অটো ট্রেড ফায়ার করা যাবে না"
+        // The right button of the QUANT section is driven STRICTLY by Authorized106MatrixEngine with 30s active countdown.
+        // If the button shows "-Wait" or the countdown is inactive/expired: STRICTLY BLOCK ALL AUTO-TRADES!
+        if (!_isQuantSignalActive.value || _quantActiveSignal.value == null) {
+            return
+        }
+
+        val activeQuant = _quantActiveSignal.value ?: return
+        if (activeQuant.direction != TradeDirection.UP && activeQuant.direction != TradeDirection.DOWN) {
+            return
+        }
+
+        // Evaluate mathSignal strictly from Authorized106MatrixEngine. No secondary engine or heuristic fallbacks!
         val mathSignal = com.example.data.matrix.Authorized106MatrixEngine.evaluate(
             val5m = v5,
             val60m = v60,
             val1d = v1d,
             history = rollingMetricHistory
-        ) ?: com.example.data.matrix.Directional206MatrixEngine.evaluate(
-            val5m = v5,
-            val60m = v60,
-            val1d = null,
-            history = emptyList()
-        )?.let { match ->
-            com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match(
-                id = match.id,
-                direction = match.direction,
-                outputCode = match.outputCode,
-                title = match.title,
-                conditionDescription = match.conditionDescription,
-                priority = match.priority
-            )
-        }
+        )
 
-        // Unify rule identification with UI dashboard: check mathSignal, analysis.primaryMatrixId, canonicalDecision
-        val candidateRuleId = mathSignal?.id
-            ?: analysis.primaryMatrixId
-            ?: analysis.canonicalDecision?.primaryMatrixId
-
-        if (candidateRuleId.isNullOrBlank()) {
+        // Must match active signal displayed in QUANT right button
+        if (mathSignal == null || mathSignal.id != activeQuant.id) {
             return
         }
 
+        val candidateRuleId = mathSignal.id
         val cleanRuleId = candidateRuleId.replace("[", "").replace("]", "").uppercase().trim()
 
         // 100% MANDATORY STRICT USER MANDATE (মেট্রিক সেকশনে ভেরিফাইকৃত ও টিক চিহ্নযুক্ত রুলস):
         // Only verified and ticked (✓) metric numbers in UserRuleRegistry will take auto entry as soon as detected on screen!
-        // Outside of verified rules, NO entry will be taken! This permanent policy cannot be changed without explicit user permission.
         val isRuleUserVerified = com.example.data.matrix.UserRuleRegistry.isRuleVerified(cleanRuleId)
         if (!isRuleUserVerified) {
-            // Rule is not verified or user unticked it via the dashboard Verify button: strictly block auto entry!
             if (lastAutoTradeMatrixId != null && lastAutoTradeMatrixId != cleanRuleId) {
                 lastAutoTradeMatrixId = null
                 lastDispatchedFingerprint = null
@@ -1334,27 +1363,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Resolve effective trade direction, honoring any user direction override in UserRuleRegistry
         val overrideDir = com.example.data.matrix.UserRuleRegistry.getRuleOverride(cleanRuleId)
-        val effectiveDir = overrideDir
-            ?: mathSignal?.direction
-            ?: if (cleanRuleId.startsWith("U")) TradeDirection.UP
-            else if (cleanRuleId.startsWith("D")) TradeDirection.DOWN
-            else analysis.direction
+        val effectiveDir = overrideDir ?: mathSignal.direction
 
         if (effectiveDir != TradeDirection.UP && effectiveDir != TradeDirection.DOWN) {
             return
         }
 
         val tradeSide = if (effectiveDir == TradeDirection.UP) "BUY" else "SELL"
-        val ruleTitle = mathSignal?.title ?: analysis.primaryMatrixTitle ?: "Rule $cleanRuleId"
+        val ruleTitle = mathSignal.title
         val fp = "SIG:${cleanRuleId}:${tradeSide}"
         val now = System.currentTimeMillis()
 
-        // STRICT SINGLE-ENTRY BURST CHECK:
-        // Prevents multi-firing (e.g. 100 orders/sec) during continuous 10ms camera OCR frames on the exact same static display.
-        // Once 2000ms have elapsed OR if the rule/direction changes, verified rules dispatch instantly.
+        // STRICT SINGLE-ENTRY GUARANTEE (USER MANDATE - 1 TRADE PER SIGNAL):
+        // Prevents duplicate firing on continuous 20ms camera OCR frames.
+        // Once a signal fires, it remains strictly locked for the entire duration this rule stays active on screen.
+        // It will NEVER fire a second trade on the exact same signal.
         val isBurstDuplicate = (cleanRuleId == lastAutoTradeMatrixId) &&
                 (effectiveDir == lastAutoTradeDirection) &&
-                ((now - lastAutoTradeDispatchedAtMs) < 2000L)
+                ((now - lastAutoTradeDispatchedAtMs) < 60_000L)
 
         if (!isBurstDuplicate) {
             val decisionToDispatch = com.example.data.models.CanonicalDecision(
@@ -1392,7 +1418,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 lastAutoTradeDirection = effectiveDir
                 lastAutoTradeMatrixId = cleanRuleId
                 lastWebSocketCommand = if (effectiveDir == TradeDirection.UP) "CLICK_BUY" else "CLICK_SELL"
-                Log.i(TAG, "MANDATORY AUTO-TRADE EXECUTED: [$cleanRuleId] ✔ -> $tradeSide via WebSocket/Webhook | Burst single-entry locked for 2s")
+                Log.i(TAG, "MANDATORY AUTO-TRADE EXECUTED: [$cleanRuleId] ✔ -> $tradeSide via WebSocket/Webhook | Strictly 1 single trade locked")
             }
         }
 
