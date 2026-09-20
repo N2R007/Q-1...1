@@ -41,5 +41,6 @@ enum class MicroTriggerCondition {
     DETERIORATING_60M_STILL_BEARISH, // 60min deteriorating but still negative
     DETERIORATING_60M_STILL_BULLISH, // 60min deteriorating but still positive
     FIVE_MIN_SPIKE_AGAINST_TREND,   // 5min spike against 60min trend
-    DIVERGENCE_PATTERN               // 5min and 60min moving in opposite directions
+    DIVERGENCE_PATTERN,             // 5min and 60min moving in opposite directions
+    VELOCITY_DIVERGENCE             // Pattern 7: Velocity divergence
 }

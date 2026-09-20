@@ -55,9 +55,14 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.ui.platform.LocalClipboardManager
+import android.widget.Toast
+import com.example.network.RelayDeliveryStatus
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
@@ -170,7 +175,7 @@ fun TradingDashboardSection(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val isWsConnected by com.example.network.WebSocketTradeRelay.connectionState.collectAsState()
-    val tabs = listOf("Analysis", "Auto-Trade")
+    val tabs = listOf("Live Price Momentum", "100% Auto-Trade")
 
     Column(
         modifier = modifier
@@ -342,11 +347,31 @@ fun MainAnalysisTab(
                 },
                 onManualBuy = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    TradeExecutionDispatcher.dispatchManualTrade("CLICK_BUY", 100.0)
+                    val prev5m = uiState.history.firstOrNull { it.isValid && it.change5mValue != null }?.change5mValue
+                    val prev60m = uiState.history.firstOrNull { it.isValid && it.change60mValue != null }?.change60mValue
+                    TradeExecutionDispatcher.dispatchManualTrade(
+                        command = "CLICK_BUY",
+                        investmentAmount = 100.0,
+                        prev5m = prev5m,
+                        prev60m = prev60m,
+                        current5m = analysis?.change5mValue,
+                        current60m = analysis?.change60mValue,
+                        matrixOrLocation = analysis?.primaryMatrixId ?: "MANUAL BUY"
+                    )
                 },
                 onManualSell = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    TradeExecutionDispatcher.dispatchManualTrade("CLICK_SELL", 100.0)
+                    val prev5m = uiState.history.firstOrNull { it.isValid && it.change5mValue != null }?.change5mValue
+                    val prev60m = uiState.history.firstOrNull { it.isValid && it.change60mValue != null }?.change60mValue
+                    TradeExecutionDispatcher.dispatchManualTrade(
+                        command = "CLICK_SELL",
+                        investmentAmount = 100.0,
+                        prev5m = prev5m,
+                        prev60m = prev60m,
+                        current5m = analysis?.change5mValue,
+                        current60m = analysis?.change60mValue,
+                        matrixOrLocation = analysis?.primaryMatrixId ?: "MANUAL SELL"
+                    )
                 }
             )
         }
@@ -800,19 +825,6 @@ fun QuantitativeMetricsGrid(
 
     val isCoreDetected = analysis?.isValid == true && analysis.isSuccess && val5m != null && val60m != null
 
-    val evaluatedMatch = remember(val5m, val60m, val1d, metricSnapshots, refreshVerifiedState, isCoreDetected) {
-        if (!isCoreDetected) {
-            null
-        } else {
-            Authorized106MatrixEngine.evaluate(
-                val5m = val5m,
-                val60m = val60m,
-                val1d = val1d,
-                history = metricSnapshots
-            )
-        }
-    }
-
     // Active signal state
     var activeSignal by remember { mutableStateOf<Authorized106MatrixEngine.Matrix106Match?>(null) }
     var signalTimestamp by remember { mutableStateOf(0L) }
@@ -824,23 +836,66 @@ fun QuantitativeMetricsGrid(
     var lastAlertedDirection by remember { mutableStateOf<TradeDirection?>(null) }
     var lastAlertedTimestamp by remember { mutableStateOf(0L) }
 
-    // When 5m or 60m are not detected on screen, immediately deactivate and clear any UP/DOWN signal
-    LaunchedEffect(isCoreDetected) {
-        if (!isCoreDetected) {
-            activeSignal = null
-            isSignalActive = false
-            remainingSeconds = 0
-            signalTimestamp = 0L
+    // Latched state for 5m, 60m percentages: persists values rock-steady without jumping
+    var latched5mStr by remember { mutableStateOf<String?>(null) }
+    var latched5mValue by remember { mutableStateOf<Double?>(null) }
+    var latched60mStr by remember { mutableStateOf<String?>(null) }
+    var latched60mValue by remember { mutableStateOf<Double?>(null) }
+    var latched1dValue by remember { mutableStateOf<Double?>(null) }
+
+    var isNewChangeTrigger by remember { mutableIntStateOf(0) }
+
+    // Detect incoming valid percentage readings and track genuine changes
+    val current5m = analysis?.change5mValue
+    val current60m = analysis?.change60mValue
+    val current1d = analysis?.change1dValue
+    val current5mStr = analysis?.change5m
+    val current60mStr = analysis?.change60m
+
+    val hasValidReading = analysis?.isValid == true && analysis.isSuccess &&
+            current5m != null && current60m != null &&
+            !current5mStr.isNullOrBlank() && current5mStr != "--" &&
+            !current60mStr.isNullOrBlank() && current60mStr != "--"
+
+    LaunchedEffect(current5m, current60m, current5mStr, current60mStr, hasValidReading) {
+        if (hasValidReading && current5m != null && current60m != null && current5mStr != null && current60mStr != null) {
+            val isFirstTime = latched5mValue == null || latched60mValue == null
+            val has5mChanged = latched5mValue != null && (current5mStr != latched5mStr || kotlin.math.abs(current5m - (latched5mValue ?: 0.0)) >= 0.0001)
+            val has60mChanged = latched60mValue != null && (current60mStr != latched60mStr || kotlin.math.abs(current60m - (latched60mValue ?: 0.0)) >= 0.0001)
+
+            if (isFirstTime || has5mChanged || has60mChanged) {
+                latched5mValue = current5m
+                latched5mStr = current5mStr
+                latched60mValue = current60m
+                latched60mStr = current60mStr
+                latched1dValue = current1d
+                isNewChangeTrigger++
+            }
         }
     }
 
-    // Update signal when a valid matrix match is actively detected on screen
-    LaunchedEffect(evaluatedMatch?.id, evaluatedMatch?.direction, isCoreDetected) {
-        if (isCoreDetected && evaluatedMatch != null) {
+    // Evaluated match using latched values: only re-evaluates when new change arrives
+    val evaluatedMatch = remember(latched5mValue, latched60mValue, latched1dValue, metricSnapshots, refreshVerifiedState, isNewChangeTrigger) {
+        val m5 = latched5mValue
+        val m60 = latched60mValue
+        if (m5 == null || m60 == null) {
+            null
+        } else {
+            Authorized106MatrixEngine.evaluate(
+                val5m = m5,
+                val60m = m60,
+                val1d = latched1dValue,
+                history = metricSnapshots
+            )
+        }
+    }
+
+    // Update signal and restart countdown when a new change in 5m or 60m arrives and matches a rule
+    LaunchedEffect(evaluatedMatch?.id, evaluatedMatch?.direction, isNewChangeTrigger) {
+        if (evaluatedMatch != null && latched5mValue != null && latched60mValue != null) {
             val now = System.currentTimeMillis()
             val isSameRule = (lastAlertedRuleId == evaluatedMatch.id && lastAlertedDirection == evaluatedMatch.direction)
             // Strict user command: do NOT repeatedly pronounce the same number.
-            // Only announce if it is a genuinely new rule number/direction or if at least 60 seconds have elapsed.
             val isDuplicate = isSameRule && (now - lastAlertedTimestamp < 60_000L)
 
             activeSignal = evaluatedMatch
@@ -870,7 +925,7 @@ fun QuantitativeMetricsGrid(
         }
     }
 
-    // 30-second countdown timer: Once expired, becomes inactive (greyed out) and stays grey until a genuinely new match occurs
+    // 30-second countdown timer: Once expired, becomes inactive (greyed out) and stays grey until a second 5m/60m change occurs
     LaunchedEffect(signalTimestamp) {
         if (signalTimestamp > 0L) {
             isSignalActive = true
@@ -891,19 +946,19 @@ fun QuantitativeMetricsGrid(
     val isUp = activeSignal?.direction == TradeDirection.UP
     val isDown = activeSignal?.direction == TradeDirection.DOWN
 
-    // Color assignment: User explicitly commanded UP = Green, DOWN = Red.
+    // Color assignment: User explicitly commanded UP = Green, DOWN = Red, and Grey when countdown expires.
     val activeColor = when {
-        !isSignalActive -> TextMuted
+        !isSignalActive -> Color(0xFF6B7280)
         isUp -> NeonGreen
         isDown -> NeonRed
-        else -> TextMuted
+        else -> Color(0xFF6B7280)
     }
 
     val activeColorLight = when {
-        !isSignalActive -> TextMuted
+        !isSignalActive -> Color(0xFF9CA3AF)
         isUp -> NeonGreenLight
         isDown -> NeonRedLight
-        else -> TextMuted
+        else -> Color(0xFF9CA3AF)
     }
 
     val buttonBrush = if (isSignalActive && activeSignal != null) {
@@ -912,11 +967,20 @@ fun QuantitativeMetricsGrid(
         } else {
             Brush.verticalGradient(listOf(Color(0xFFEF4444), Color(0xFFDC2626)))
         }
+    } else if (activeSignal != null) {
+        SolidColor(Color(0xFF262A33)) // Grey background when countdown ends
     } else {
         SolidColor(Color(0xFF27272A))
     }
 
-    val buttonBorderColor = if (isSignalActive) activeColorLight else Color(0xFF3F3F46)
+    val buttonBorderColor = if (isSignalActive && activeSignal != null) {
+        activeColorLight
+    } else if (activeSignal != null) {
+        Color(0xFF4B5563) // Grey border when countdown ends
+    } else {
+        Color(0xFF3F3F46)
+    }
+
     val cardBorderColor = if (isSignalActive) activeColor.copy(alpha = 0.85f) else BorderStrokeLight
 
     var showRuleManagerDialog by remember { mutableStateOf(false) }
@@ -935,14 +999,25 @@ fun QuantitativeMetricsGrid(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "CANONICAL",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextMuted,
-                    letterSpacing = 0.5.sp,
-                    maxLines = 1
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Analytics,
+                        contentDescription = "Quantitative Analytics",
+                        tint = AccentCyan,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "QUANT",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        letterSpacing = 0.5.sp,
+                        maxLines = 1
+                    )
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -973,7 +1048,7 @@ fun QuantitativeMetricsGrid(
                         }
                     }
 
-                    // Verify Button: Marks current matched rule as verified/unverified with tick mark (✓)
+                    // Verify Button: Marks current matched rule as verified/unverified with single tick mark (✓)
                     val currentSignalId = (activeSignal?.id ?: analysis?.primaryMatrixId ?: analysis?.canonicalDecision?.primaryMatrixId)
                         ?.replace("[", "")?.replace("]", "")?.trim()
                     val isCurrentRuleVerified = if (!currentSignalId.isNullOrBlank()) {
@@ -1001,14 +1076,16 @@ fun QuantitativeMetricsGrid(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Verify",
-                                tint = if (isCurrentRuleVerified) NeonGreenLight else TextSecondary,
-                                modifier = Modifier.size(12.dp)
-                            )
+                            if (isCurrentRuleVerified) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Verified",
+                                    tint = NeonGreenLight,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
                             Text(
-                                text = if (isCurrentRuleVerified) "✓ Verified" else "Verify",
+                                text = if (isCurrentRuleVerified) "Verified" else "Verify",
                                 fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isCurrentRuleVerified) NeonGreenLight else TextSecondary
@@ -1023,8 +1100,8 @@ fun QuantitativeMetricsGrid(
                 horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 // 1. 5 min card
-                val v5 = analysis?.change5mValue ?: 0.0
-                val p5mStr = analysis?.change5m ?: "--"
+                val v5 = latched5mValue ?: analysis?.change5mValue ?: 0.0
+                val p5mStr = latched5mStr ?: analysis?.change5m ?: "--"
                 val font5m = when {
                     p5mStr.length <= 5 -> 18.sp
                     p5mStr.length <= 6 -> 16.5.sp
@@ -1066,8 +1143,8 @@ fun QuantitativeMetricsGrid(
                 }
 
                 // 2. 60 min card
-                val v60 = analysis?.change60mValue ?: 0.0
-                val p60mStr = analysis?.change60m ?: "--"
+                val v60 = latched60mValue ?: analysis?.change60mValue ?: 0.0
+                val p60mStr = latched60mStr ?: analysis?.change60m ?: "--"
                 val font60m = when {
                     p60mStr.length <= 5 -> 18.sp
                     p60mStr.length <= 6 -> 16.5.sp
@@ -1128,7 +1205,7 @@ fun QuantitativeMetricsGrid(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Middle Button: "UP" / "DOWN" (Solid colored when active, greyed out after 30s)
+                // Middle Button: "UP" / "DOWN" (Solid colored when active, greyed out after countdown until second change)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1139,16 +1216,20 @@ fun QuantitativeMetricsGrid(
                         .testTag("signal_action_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isSignalActive && activeSignal != null) {
+                    if (activeSignal != null) {
+                        val isSignalUp = activeSignal?.direction == TradeDirection.UP
+                        val iconColor = if (isSignalActive) Color.White else Color(0xFF9CA3AF)
+                        val textColor = if (isSignalActive) Color.White else Color(0xFF9CA3AF)
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            if (activeSignal?.direction == TradeDirection.DOWN) {
+                            if (!isSignalUp) {
                                 Icon(
                                     imageVector = Icons.Default.ArrowDownward,
                                     contentDescription = "DOWN",
-                                    tint = Color.White,
+                                    tint = iconColor,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
@@ -1156,14 +1237,14 @@ fun QuantitativeMetricsGrid(
                                     text = "DOWN",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = Color.White,
+                                    color = textColor,
                                     letterSpacing = 0.5.sp
                                 )
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.ArrowUpward,
                                     contentDescription = "UP",
-                                    tint = Color.White,
+                                    tint = iconColor,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
@@ -1171,12 +1252,12 @@ fun QuantitativeMetricsGrid(
                                     text = "UP",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = Color.White,
+                                    color = textColor,
                                     letterSpacing = 0.5.sp
                                 )
                             }
 
-                            if (remainingSeconds > 0) {
+                            if (isSignalActive && remainingSeconds > 0) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "${remainingSeconds}s",
@@ -1199,8 +1280,8 @@ fun QuantitativeMetricsGrid(
                 }
 
                 // Bottom row: Matched Matrix ID flanked by 5m (left) and 60m (right) real strength arrows
-                val v5 = analysis?.change5mValue ?: 0.0
-                val v60 = analysis?.change60mValue ?: 0.0
+                val v5 = latched5mValue ?: analysis?.change5mValue ?: 0.0
+                val v60 = latched60mValue ?: analysis?.change60mValue ?: 0.0
                 val str5 = kotlin.math.abs(v5)
                 val str60 = kotlin.math.abs(v60)
 
@@ -1433,7 +1514,7 @@ fun AutoTradeEngineDashboardCard(
                 .fillMaxWidth()
                 .padding(10.dp)
         ) {
-            // Top Row: ▲ Auto-Trade Engine and ● TRADE OFF / ● TRADE ON
+            // Top Row: Auto-Trade Engine Status & Master Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1441,50 +1522,50 @@ fun AutoTradeEngineDashboardCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Warning,
+                        imageVector = Icons.Default.Speed,
                         contentDescription = "Auto-Trade Engine",
-                        tint = if (isAutoTradeEnabled) NeonGreenLight else Color(0xFFF87171),
-                        modifier = Modifier.size(14.dp)
+                        tint = if (isAutoTradeEnabled) NeonGreenLight else Color(0xFF9CA3AF),
+                        modifier = Modifier.size(16.dp)
                     )
                     Text(
                         text = "Auto-Trade Engine",
                         fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isAutoTradeEnabled) NeonGreenLight else Color(0xFFF87171)
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
 
-                // Toggle Button (Outlined pill)
+                // Master Toggle Button
                 Surface(
                     onClick = onToggleAutoTrade,
                     shape = RoundedCornerShape(6.dp),
-                    color = if (isAutoTradeEnabled) Color(0xFF102618) else Color(0xFF2A1518),
+                    color = if (isAutoTradeEnabled) Color(0xFF102618) else Color(0xFF27272A),
                     border = BorderStroke(
-                        0.5.dp,
-                        if (isAutoTradeEnabled) NeonGreen.copy(alpha = 0.8f) else Color(0xFFEF4444).copy(alpha = 0.8f)
+                        0.8.dp,
+                        if (isAutoTradeEnabled) NeonGreen else Color(0xFF4B5563)
                     ),
                     modifier = Modifier.testTag("auto_trade_toggle_button")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(6.5.dp)
+                                .size(7.dp)
                                 .clip(CircleShape)
-                                .background(if (isAutoTradeEnabled) NeonGreen else Color(0xFFEF4444))
+                                .background(if (isAutoTradeEnabled) NeonGreen else Color(0xFF9CA3AF))
                         )
                         Text(
-                            text = if (isAutoTradeEnabled) "TRADE ON" else "TRADE OFF",
+                            text = if (isAutoTradeEnabled) "ACTIVE ●" else "OFF ○",
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = FontFamily.Monospace,
-                            color = if (isAutoTradeEnabled) NeonGreen else Color(0xFFEF4444)
+                            color = if (isAutoTradeEnabled) NeonGreen else Color(0xFF9CA3AF)
                         )
                     }
                 }
@@ -1592,11 +1673,9 @@ fun TradeCardsAndAutoActiveHistoryCard(
     onSetHistoryItemOutcome: (Long, TradeOutcome) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val totalCount = executedTrades.size + analysisHistory.count { it.isValid && it.isSuccess && (it.direction == TradeDirection.UP || it.direction == TradeDirection.DOWN) }
-    val buyCount = executedTrades.count { it.direction == TradeDirection.UP } + analysisHistory.count { it.isValid && it.isSuccess && it.direction == TradeDirection.UP }
-    val sellCount = executedTrades.count { it.direction == TradeDirection.DOWN } + analysisHistory.count { it.isValid && it.isSuccess && it.direction == TradeDirection.DOWN }
-    val winCount = executedTrades.count { it.outcome == TradeOutcome.PROFIT } + analysisHistory.count { it.outcome == TradeOutcome.PROFIT }
-    val lossCount = executedTrades.count { it.outcome == TradeOutcome.LOSS } + analysisHistory.count { it.outcome == TradeOutcome.LOSS }
+    val totalCount = executedTrades.size
+    val buyCount = executedTrades.count { it.direction == TradeDirection.UP }
+    val sellCount = executedTrades.count { it.direction == TradeDirection.DOWN }
 
     Card(
         modifier = modifier
@@ -1611,7 +1690,7 @@ fun TradeCardsAndAutoActiveHistoryCard(
                 .fillMaxWidth()
                 .padding(10.dp)
         ) {
-            // Header Row: History Icon + "Trade Cards & Auto-Active History" + "Total: X" + "Reset"
+            // Header Row: History Icon + "Trade Cards & Auto-Active History" + "Reset"
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -1622,32 +1701,17 @@ fun TradeCardsAndAutoActiveHistoryCard(
                     tint = AccentCyan,
                     modifier = Modifier.size(13.dp)
                 )
-                Spacer(modifier = Modifier.width(5.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Trade Cards & Auto-Active History",
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White
                 )
-                Spacer(modifier = Modifier.width(6.dp))
-                // Total Count Badge
-                Surface(
-                    shape = RoundedCornerShape(5.dp),
-                    color = Color(0xFF0C2436),
-                    border = BorderStroke(0.5.dp, Color(0xFF0284C7).copy(alpha = 0.6f))
-                ) {
-                    Text(
-                        text = "Total: $totalCount",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = AccentCyan,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Reset Button
+                // Reset Button: Clears all cards instantly
                 Surface(
                     onClick = onReset,
                     shape = RoundedCornerShape(5.dp),
@@ -1678,23 +1742,22 @@ fun TradeCardsAndAutoActiveHistoryCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Metric Summary Bar: BUY ↗: X   SELL ↘: X         WIN: X | LOSS: X
+            // Metric Summary Bar: BUY ↗: X   SELL ↘: X   TOTAL: X (Equal Gaps)
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(8.dp),
                 color = Color(0xFF0F1218),
-                border = BorderStroke(0.5.dp, BorderStrokeLight)
+                border = BorderStroke(0.5.dp, Color.Black)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "BUY ↗: $buyCount",
@@ -1703,6 +1766,11 @@ fun TradeCardsAndAutoActiveHistoryCard(
                             fontFamily = FontFamily.Monospace,
                             color = NeonGreenLight
                         )
+                    }
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
                             text = "SELL ↘: $sellCount",
                             fontSize = 12.sp,
@@ -1711,325 +1779,418 @@ fun TradeCardsAndAutoActiveHistoryCard(
                             color = NeonRedLight
                         )
                     }
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "TOTAL: $totalCount",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            color = AccentCyan
+                        )
+                    }
+                }
+            }
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Scrollable List of Individual Trade Cards
+            if (executedTrades.isEmpty()) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0B0E14),
+                    border = BorderStroke(0.5.dp, Color(0xFF1E232D))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                tint = TextMuted.copy(alpha = 0.5f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(5.dp))
+                            Text(
+                                text = "কোনো সক্রিয় ট্রেড কার্ড নেই — ট্রেড সম্পন্ন হলে এখানে কার্ড তৈরি হবে",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    executedTrades.forEachIndexed { index, record ->
+                        IndividualTradeHistoryCard(
+                            record = record,
+                            index = index,
+                            totalCount = executedTrades.size,
+                            onSetOutcome = { outcome ->
+                                onSetExecutedTradeOutcome(record.id, outcome)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IndividualTradeHistoryCard(
+    record: TradeExecutionDispatcher.ExecutedTradeRecord,
+    index: Int,
+    totalCount: Int,
+    onSetOutcome: (TradeOutcome) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val dateStr = remember(record.timestamp) {
+        try {
+            val sdf = SimpleDateFormat("dd MMM yyyy • HH:mm:ss", Locale.US)
+            sdf.format(Date(record.timestamp))
+        } catch (e: Exception) {
+            "--"
+        }
+    }
+
+    val isUp = record.direction == TradeDirection.UP
+    val dirColor = if (isUp) NeonGreenLight else NeonRedLight
+    val dirBg = if (isUp) Color(0xFF0D2517) else Color(0xFF281114)
+    val dirBorder = if (isUp) Color(0xFF165C34) else Color(0xFF6B2026)
+    val dirText = if (isUp) "BUY ↗" else "SELL ↘"
+
+    val prev5mStr = record.prev5m?.let { TradingOutputParser.formatWithSign(it) } ?: "--"
+    val prev60mStr = record.prev60m?.let { TradingOutputParser.formatWithSign(it) } ?: "--"
+    val cur5mStr = record.current5m?.let { TradingOutputParser.formatWithSign(it) } ?: "--"
+    val cur60mStr = record.current60m?.let { TradingOutputParser.formatWithSign(it) } ?: "--"
+
+    val locationOrRule = record.matrixOrLocation ?: record.ruleId ?: "DIRECT SIGNAL"
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF121620)),
+        border = BorderStroke(0.8.dp, Color.Black)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp)
+        ) {
+            // Header Row: # Trade Index + Direction Badge + Auto/Manual Tag + Spacer + Copy Icon
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Trade Index
+                Text(
+                    text = "#${totalCount - index}",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    color = AccentCyan
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Direction Badge (BUY ↗ / SELL ↘)
+                Surface(
+                    shape = RoundedCornerShape(5.dp),
+                    color = dirBg,
+                    border = BorderStroke(0.8.dp, dirBorder)
+                ) {
                     Text(
-                        text = "WIN: $winCount | LOSS: $lossCount",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace,
-                        color = TextSecondary
+                        text = dirText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        color = dirColor,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Auto / Manual Tag
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (record.isAuto) Color(0xFF0F2532) else Color(0xFF281F12),
+                    border = BorderStroke(0.5.dp, if (record.isAuto) Color(0xFF1E455C) else Color(0xFF4A3820))
+                ) {
+                    Text(
+                        text = if (record.isAuto) "AUTO ⚡" else "MANUAL 👆",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (record.isAuto) AccentCyan else Color(0xFFF59E0B),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                // One-tap copy button for complete card summary
+                IconButton(
+                    onClick = {
+                        val fullSummary = """
+                            Trade #${totalCount - index} [${if (isUp) "UP / BUY ↗" else "DOWN / SELL ↘"}]
+                            Type: ${if (record.isAuto) "AUTO" else "MANUAL"}
+                            Date & Time: $dateStr
+                            Previous: 5M: $prev5mStr | 60M: $prev60mStr
+                            Current (Entry): 5M: $cur5mStr | 60M: $cur60mStr
+                            Location / Rule: $locationOrRule
+                            Channel: ${record.channel} (${record.latencyMs}ms)
+                            Status: ${record.status}
+                        """.trimIndent()
+                        clipboardManager.setText(AnnotatedString(fullSummary))
+                        Toast.makeText(context, "Trade #$index info copied to clipboard", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy details",
+                        tint = TextMuted,
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
 
-            // Body Area: Empty state or trade cards
-            if (totalCount == 0) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 24.dp, horizontal = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "No trades recorded.",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "When screen detection & auto-trade are active or manual buttons clicked, trade history cards will appear here.",
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            } else {
-                Spacer(modifier = Modifier.height(10.dp))
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Show executed trades first
-                    executedTrades.take(5).forEach { trade ->
-                        val isBuy = trade.direction == TradeDirection.UP
-                        val isWin = trade.outcome == TradeOutcome.PROFIT
-                        val isLoss = trade.outcome == TradeOutcome.LOSS
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = when {
-                                    isWin -> Color(0xFF101F16)
-                                    isLoss -> Color(0xFF221114)
-                                    else -> Color(0xFF161A22)
-                                }
-                            ),
-                            border = BorderStroke(
-                                0.5.dp,
-                                when {
-                                    isWin -> NeonGreen.copy(alpha = 0.6f)
-                                    isLoss -> NeonRed.copy(alpha = 0.6f)
-                                    isBuy -> NeonGreen.copy(alpha = 0.3f)
-                                    else -> NeonRed.copy(alpha = 0.3f)
-                                }
-                            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Time and Date Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DateRange,
+                    contentDescription = "Date and time",
+                    tint = TextMuted,
+                    modifier = Modifier.size(11.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = dateStr,
+                    fontSize = 10.5.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = TextSecondary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // SelectionContainer: Wraps all percentage & location data for long-press selection & copy
+            SelectionContainer {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Previous vs Current 5m / 60m Metrics Grid
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(7.dp),
+                        color = Color(0xFF0A0D14),
+                        border = BorderStroke(0.6.dp, Color.Black)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        // Direction Pill
-                                        Surface(
-                                            shape = RoundedCornerShape(5.dp),
-                                            color = if (isBuy) NeonGreenDim else NeonRedDim,
-                                            border = BorderStroke(0.5.dp, if (isBuy) NeonGreen else NeonRed)
-                                        ) {
-                                            Text(
-                                                text = if (isBuy) "BUY ↗" else "SELL ↘",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = if (isBuy) NeonGreenLight else NeonRedLight,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-
-                                        // Source Tag
-                                        Surface(
-                                            shape = RoundedCornerShape(5.dp),
-                                            color = AccentCyan.copy(alpha = 0.12f),
-                                            border = BorderStroke(0.5.dp, AccentCyan.copy(alpha = 0.5f))
-                                        ) {
-                                            Text(
-                                                text = trade.ruleId?.let { "[$it]" } ?: if (trade.isAuto) "AUTO" else "MANUAL",
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = AccentCyan,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-
-                                        Text(
-                                            text = SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(trade.timestamp),
-                                            fontSize = 10.5.sp,
-                                            color = TextMuted,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
-
-                                    // Win / Loss Selector
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Surface(
-                                            onClick = {
-                                                onSetExecutedTradeOutcome(trade.id, TradeOutcome.PROFIT)
-                                            },
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = if (isWin) NeonGreen else DarkSurfaceVariant,
-                                            border = BorderStroke(0.5.dp, if (isWin) NeonGreen else BorderStrokeLight)
-                                        ) {
-                                            Text(
-                                                text = "WIN",
-                                                fontSize = 9.5.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = if (isWin) Color.Black else TextSecondary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
-                                            )
-                                        }
-                                        Surface(
-                                            onClick = {
-                                                onSetExecutedTradeOutcome(trade.id, TradeOutcome.LOSS)
-                                            },
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = if (isLoss) NeonRed else DarkSurfaceVariant,
-                                            border = BorderStroke(0.5.dp, if (isLoss) NeonRed else BorderStrokeLight)
-                                        ) {
-                                            Text(
-                                                text = "LOSS",
-                                                fontSize = 9.5.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = if (isLoss) Color.White else TextSecondary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                            // Previous Column
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "PREVIOUS (পূর্বে)",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextMuted,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
-                                        text = "${trade.channel} • ${trade.latencyMs}ms latency",
-                                        fontSize = 10.sp,
-                                        color = TextMuted,
-                                        fontFamily = FontFamily.Monospace
+                                        text = "5M: $prev5mStr",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (record.prev5m != null && record.prev5m > 0) NeonGreenLight else if (record.prev5m != null && record.prev5m < 0) NeonRedLight else TextSecondary
                                     )
                                     Text(
-                                        text = "✔ Single-Entry Dispatched",
-                                        fontSize = 10.sp,
+                                        text = "60M: $prev60mStr",
+                                        fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = NeonGreenLight
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (record.prev60m != null && record.prev60m > 0) NeonGreenLight else if (record.prev60m != null && record.prev60m < 0) NeonRedLight else TextSecondary
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(30.dp)
+                                    .background(Color(0xFF1E232D))
+                            )
+
+                            // Current Column
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 8.dp)
+                            ) {
+                                Text(
+                                    text = "CURRENT (বর্তমান)",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextMuted,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(
+                                        text = "5M: $cur5mStr",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (record.current5m != null && record.current5m > 0) NeonGreenLight else if (record.current5m != null && record.current5m < 0) NeonRedLight else TextPrimary
+                                    )
+                                    Text(
+                                        text = "60M: $cur60mStr",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = if (record.current60m != null && record.current60m > 0) NeonGreenLight else if (record.current60m != null && record.current60m < 0) NeonRedLight else TextPrimary
                                     )
                                 }
                             }
                         }
                     }
 
-                    // Also show recent analysis items if executedTrades has room
-                    val recentValidAnalysis = analysisHistory.filter { it.isValid && it.isSuccess && (it.direction == TradeDirection.UP || it.direction == TradeDirection.DOWN) }.take(5 - executedTrades.take(5).size)
-                    recentValidAnalysis.forEach { item ->
-                        val isBuy = item.direction == TradeDirection.UP
-                        val isWin = item.outcome == TradeOutcome.PROFIT
-                        val isLoss = item.outcome == TradeOutcome.LOSS
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = when {
-                                    isWin -> Color(0xFF101F16)
-                                    isLoss -> Color(0xFF221114)
-                                    else -> Color(0xFF161A22)
-                                }
-                            ),
-                            border = BorderStroke(
-                                0.5.dp,
-                                when {
-                                    isWin -> NeonGreen.copy(alpha = 0.6f)
-                                    isLoss -> NeonRed.copy(alpha = 0.6f)
-                                    isBuy -> NeonGreen.copy(alpha = 0.3f)
-                                    else -> NeonRed.copy(alpha = 0.3f)
-                                }
-                            )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Location / Matrix Information & Delivery Channel
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF0D1017),
+                        border = BorderStroke(0.5.dp, Color.Black)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(5.dp),
-                                            color = if (isBuy) NeonGreenDim else NeonRedDim,
-                                            border = BorderStroke(0.5.dp, if (isBuy) NeonGreen else NeonRed)
-                                        ) {
-                                            Text(
-                                                text = if (isBuy) "BUY ↗" else "SELL ↘",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = if (isBuy) NeonGreenLight else NeonRedLight,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
+                                Text(
+                                    text = "LOCATION / RULE:",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextMuted
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = locationOrRule,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color(0xFFE2E8F0),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
 
-                                        val mId = item.primaryMatrixId ?: "SIGNAL"
-                                        Surface(
-                                            shape = RoundedCornerShape(5.dp),
-                                            color = AccentCyan.copy(alpha = 0.12f),
-                                            border = BorderStroke(0.5.dp, AccentCyan.copy(alpha = 0.5f))
-                                        ) {
-                                            Text(
-                                                text = mId,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = AccentCyan,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
+                            Spacer(modifier = Modifier.height(3.dp))
 
-                                        Text(
-                                            text = SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(item.timestamp),
-                                            fontSize = 10.5.sp,
-                                            color = TextMuted,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "DELIVERY: ${record.channel} (${record.latencyMs}ms)",
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = TextSecondary
+                                )
 
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Surface(
-                                            onClick = {
-                                                onSetHistoryItemOutcome(item.timestamp, TradeOutcome.PROFIT)
-                                            },
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = if (isWin) NeonGreen else DarkSurfaceVariant,
-                                            border = BorderStroke(0.5.dp, if (isWin) NeonGreen else BorderStrokeLight)
-                                        ) {
-                                            Text(
-                                                text = "WIN",
-                                                fontSize = 9.5.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = if (isWin) Color.Black else TextSecondary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
-                                            )
-                                        }
-                                        Surface(
-                                            onClick = {
-                                                onSetHistoryItemOutcome(item.timestamp, TradeOutcome.LOSS)
-                                            },
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = if (isLoss) NeonRed else DarkSurfaceVariant,
-                                            border = BorderStroke(0.5.dp, if (isLoss) NeonRed else BorderStrokeLight)
-                                        ) {
-                                            Text(
-                                                text = "LOSS",
-                                                fontSize = 9.5.sp,
-                                                fontWeight = FontWeight.Black,
-                                                color = if (isLoss) Color.White else TextSecondary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "5m: ${item.change5m ?: "--"} • 60m: ${item.change60m ?: "--"}",
-                                        fontSize = 10.sp,
-                                        color = TextMuted,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                    Text(
-                                        text = String.format(java.util.Locale.US, "%.1f%% Conf", item.calculatedPercentage),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
-                                    )
-                                }
+                                Text(
+                                    text = "STATUS: ${record.status}",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (record.status == RelayDeliveryStatus.DELIVERED) NeonGreenLight else Color(0xFFF59E0B)
+                                )
                             }
                         }
+                    }
+                }
+            }
+
+            // Outcome Buttons (WIN / LOSS)
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // PROFIT Button
+                Surface(
+                    onClick = { onSetOutcome(TradeOutcome.PROFIT) },
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (record.outcome == TradeOutcome.PROFIT) Color(0xFF0F3820) else Color(0xFF141922),
+                    border = BorderStroke(0.5.dp, if (record.outcome == TradeOutcome.PROFIT) NeonGreenLight else Color(0xFF222B38)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (record.outcome == TradeOutcome.PROFIT) "PROFIT ✔" else "PROFIT",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (record.outcome == TradeOutcome.PROFIT) NeonGreenLight else TextMuted
+                        )
+                    }
+                }
+
+                // LOSS Button
+                Surface(
+                    onClick = { onSetOutcome(TradeOutcome.LOSS) },
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (record.outcome == TradeOutcome.LOSS) Color(0xFF381418) else Color(0xFF141922),
+                    border = BorderStroke(0.5.dp, if (record.outcome == TradeOutcome.LOSS) NeonRedLight else Color(0xFF222B38)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (record.outcome == TradeOutcome.LOSS) "LOSS ✘" else "LOSS",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (record.outcome == TradeOutcome.LOSS) NeonRedLight else TextMuted
+                        )
                     }
                 }
             }
@@ -2078,8 +2239,12 @@ fun ThreeTimeframePressureDashboardCard(
     }
 
     // 2. Real-time update logic:
-    // Strictly requires active 5m and 60m detection on screen
-    val isCoreDetected = analysis?.isValid == true && analysis.isSuccess && analysis.change5mValue != null && analysis.change60mValue != null
+    // Strictly requires active 5m and 60m detection on screen (or supplied in pressureResult)
+    val isCoreDetected = if (pressureResult != null) {
+        !pressureResult.isDataIncomplete && pressureResult.p5m != null && pressureResult.p60m != null
+    } else {
+        analysis?.isValid == true && analysis.isSuccess && analysis.change5mValue != null && analysis.change60mValue != null
+    }
 
     var activeValidResult by remember {
         mutableStateOf<ThreeTimeframePressureResult?>(

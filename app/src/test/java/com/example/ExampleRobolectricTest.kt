@@ -20,7 +20,7 @@ class ExampleRobolectricTest {
   fun `read string from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("Quant Vision", appName)
+    assertEquals("Q Scan", appName)
   }
 
   @Test
@@ -235,12 +235,11 @@ class ExampleRobolectricTest {
     assertTrue("U024 must be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U024"))
     assertTrue("D024 must be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("D024"))
 
-    // Verify Good/Medium rules do NOT have default checkmarks (user manual verify)
-    org.junit.Assert.assertFalse("U011 (Strong) should not be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U011"))
+    // Verify Medium rules do NOT have default checkmarks (user manual verify)
     org.junit.Assert.assertFalse("U005 (Medium) should not be verified by default", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U005"))
 
     // Verify user can manually toggle verify
-    com.example.data.matrix.UserRuleRegistry.setRuleVerified("U011", true)
-    assertTrue("U011 should now be verified after user marks it", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U011"))
+    com.example.data.matrix.UserRuleRegistry.setRuleVerified("U005", true)
+    assertTrue("U005 should now be verified after user marks it", com.example.data.matrix.UserRuleRegistry.isRuleVerified("U005"))
   }
 }

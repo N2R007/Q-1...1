@@ -36,8 +36,23 @@ object UserRuleRegistry {
     private const val KEY_OVERRIDES = "rule_direction_overrides"
     private const val KEY_CUSTOM_RULES = "user_custom_rules"
     private const val KEY_VERIFIED_RULES = "user_verified_rules"
+    private const val KEY_UNVERIFIED_RULES = "user_unverified_rules"
     private const val KEY_INIT_VERIFIED_POWER_V1 = "init_verified_power_v1"
     private const val KEY_INIT_VERIFIED_HIGH_V2 = "init_verified_high_v2"
+    private const val KEY_INIT_VERIFIED_ALL_V3 = "init_verified_all_v3"
+
+    // Complete System Rule Catalog (U001-U103, D001-D103, M001-M106)
+    val ALL_SYSTEM_RULE_IDS: Set<String> by lazy {
+        val set = LinkedHashSet<String>()
+        for (i in 1..103) {
+            set.add("U%03d".format(i))
+            set.add("D%03d".format(i))
+        }
+        for (i in 1..106) {
+            set.add("M%03d".format(i))
+        }
+        set
+    }
 
     // All High Category rules pre-verified with tick mark (✓) for UP & DOWN per user mandate
     val DEFAULT_VERIFIED_HIGH_RULES = setOf(
@@ -137,6 +152,7 @@ object UserRuleRegistry {
 
     // Cache of User-Verified Rules (Rule ID -> Boolean)
     private val verifiedRuleIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val unverifiedRuleIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     fun init(context: Context) {
         try {
@@ -199,25 +215,37 @@ object UserRuleRegistry {
                 }
             }
 
-            // 3. Load verified rules
+            // 3. Load verified & unverified rules
             verifiedRuleIds.clear()
-            val hasInitializedV2 = prefs.getBoolean(KEY_INIT_VERIFIED_HIGH_V2, false)
-            if (!hasInitializedV2) {
-                // Ensure ALL High Category rules (UP & DOWN) are verified with tick mark (✓)
-                verifiedRuleIds.addAll(DEFAULT_VERIFIED_HIGH_RULES)
+            unverifiedRuleIds.clear()
+            val unverifiedSet = prefs.getStringSet(KEY_UNVERIFIED_RULES, null)
+            if (unverifiedSet != null) {
+                unverifiedRuleIds.addAll(unverifiedSet)
+            }
+
+            val hasInitializedV3 = prefs.getBoolean(KEY_INIT_VERIFIED_ALL_V3, false)
+            if (!hasInitializedV3) {
+                // Pre-verify ALL system rules (U001-U103, D001-D103, M001-M106) for 100% auto-trade readiness
+                verifiedRuleIds.addAll(ALL_SYSTEM_RULE_IDS)
                 val existing = prefs.getStringSet(KEY_VERIFIED_RULES, null)
                 if (existing != null) {
                     verifiedRuleIds.addAll(existing)
                 }
+                // Subtract any explicitly unverified rules
+                verifiedRuleIds.removeAll(unverifiedRuleIds)
                 prefs.edit()
                     .putStringSet(KEY_VERIFIED_RULES, HashSet(verifiedRuleIds))
                     .putBoolean(KEY_INIT_VERIFIED_POWER_V1, true)
                     .putBoolean(KEY_INIT_VERIFIED_HIGH_V2, true)
+                    .putBoolean(KEY_INIT_VERIFIED_ALL_V3, true)
                     .apply()
             } else {
                 val verifiedSet = prefs.getStringSet(KEY_VERIFIED_RULES, null)
                 if (verifiedSet != null) {
                     verifiedRuleIds.addAll(verifiedSet)
+                } else {
+                    verifiedRuleIds.addAll(ALL_SYSTEM_RULE_IDS)
+                    verifiedRuleIds.removeAll(unverifiedRuleIds)
                 }
             }
         } catch (_: Exception) {}
@@ -226,7 +254,10 @@ object UserRuleRegistry {
     private fun saveVerifiedRulesToPrefs() {
         try {
             val prefs = preferences ?: return
-            prefs.edit().putStringSet(KEY_VERIFIED_RULES, HashSet(verifiedRuleIds)).apply()
+            prefs.edit()
+                .putStringSet(KEY_VERIFIED_RULES, HashSet(verifiedRuleIds))
+                .putStringSet(KEY_UNVERIFIED_RULES, HashSet(unverifiedRuleIds))
+                .apply()
         } catch (_: Exception) {}
     }
 
@@ -378,11 +409,16 @@ object UserRuleRegistry {
 
     /**
      * Check if a rule is verified by the user.
+     * All system rules (U/D/M) and active custom rules (C) are verified by default
+     * for 100% Auto-Trade execution, unless explicitly unverified by the user.
      */
     fun isRuleVerified(ruleId: String): Boolean {
         if (ruleId.isBlank()) return false
         val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
-        return verifiedRuleIds.contains(cleanId)
+        if (unverifiedRuleIds.contains(cleanId)) return false
+        if (verifiedRuleIds.contains(cleanId)) return true
+        // Default: Any valid directional/matrix rule (U, D, M) or custom rule (C) is eligible for 100% Auto-Trade
+        return cleanId.startsWith("U") || cleanId.startsWith("D") || cleanId.startsWith("M") || cleanId.startsWith("C")
     }
 
     /**
@@ -391,10 +427,13 @@ object UserRuleRegistry {
     fun toggleVerifiedRule(ruleId: String): Boolean {
         if (ruleId.isBlank()) return false
         val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
-        val isNowVerified = if (verifiedRuleIds.contains(cleanId)) {
+        val currentlyVerified = isRuleVerified(cleanId)
+        val isNowVerified = if (currentlyVerified) {
             verifiedRuleIds.remove(cleanId)
+            unverifiedRuleIds.add(cleanId)
             false
         } else {
+            unverifiedRuleIds.remove(cleanId)
             verifiedRuleIds.add(cleanId)
             true
         }
@@ -404,32 +443,39 @@ object UserRuleRegistry {
 
     fun setRuleVerified(ruleId: String, verified: Boolean) {
         if (ruleId.isBlank()) return
-        val cleanId = ruleId.uppercase().trim()
+        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
         if (verified) {
+            unverifiedRuleIds.remove(cleanId)
             verifiedRuleIds.add(cleanId)
         } else {
             verifiedRuleIds.remove(cleanId)
+            unverifiedRuleIds.add(cleanId)
         }
         saveVerifiedRulesToPrefs()
     }
 
     fun getVerifiedRuleIds(): Set<String> {
-        return HashSet(verifiedRuleIds)
+        val all = LinkedHashSet<String>(verifiedRuleIds)
+        all.addAll(ALL_SYSTEM_RULE_IDS)
+        all.removeAll(unverifiedRuleIds)
+        return all
     }
 
     fun clearAllVerifiedRules() {
         verifiedRuleIds.clear()
+        unverifiedRuleIds.addAll(ALL_SYSTEM_RULE_IDS)
         saveVerifiedRulesToPrefs()
     }
 
     /**
-     * Reset everything back to original state with all High category rules verified.
+     * Reset everything back to original state with all system rules verified.
      */
     fun resetAll() {
         clearAllOverrides()
         clearAllCustomRules()
+        unverifiedRuleIds.clear()
         verifiedRuleIds.clear()
-        verifiedRuleIds.addAll(DEFAULT_VERIFIED_HIGH_RULES)
+        verifiedRuleIds.addAll(ALL_SYSTEM_RULE_IDS)
         saveVerifiedRulesToPrefs()
     }
 

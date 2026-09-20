@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 /**
  * High-speed, non-blocking local HTTP Trade Webhook Client for Quant Vision AI.
  *
- * Sends POST requests to local Python / Flask / FastAPI server (e.g. http://192.168.0.102:5000/trade or ngrok URL).
+ * Sends POST requests to local Python / Flask / FastAPI server (e.g. http://192.168.0.104:5000/trade or ngrok URL).
  * JSON Payload: {"signal": "UP"} or {"signal": "DOWN"}
  * Operates in non-blocking IO coroutines with 1-second timeout.
  * Zero UI impact, completely silent on connection drops or offline server.
@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit
 object HttpTradeRelay {
 
     private const val TAG = "HttpTradeRelay"
-    const val DEFAULT_HTTP_URL = "http://192.168.0.102:5000/trade"
+    const val DEFAULT_HTTP_URL = "http://192.168.0.104:5000/trade"
 
     @Volatile
     var webhookUrl: String = DEFAULT_HTTP_URL
@@ -54,9 +54,9 @@ object HttpTradeRelay {
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(3, TimeUnit.SECONDS)
-            .writeTimeout(3, TimeUnit.SECONDS)
-            .readTimeout(3, TimeUnit.SECONDS)
+            .connectTimeout(1500, TimeUnit.MILLISECONDS)
+            .writeTimeout(1500, TimeUnit.MILLISECONDS)
+            .readTimeout(1500, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true)
             .build()
     }

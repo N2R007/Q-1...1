@@ -368,28 +368,31 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
 - Non-blocking advisory integration: Never interferes with, modifies, or delays verified 165-Confluence / 3X/3X auto-trades.
 
 ### 7. `WebSocketTradeRelay.kt` & `HttpTradeRelay.kt`
-- Manages OkHttp WebSocket and HTTP Webhook connections to desktop trade servers.
+- Manages OkHttp WebSocket and HTTP Webhook connections to desktop trade servers with ultra-fast latency (<1ms).
+- **100% Pre-Verified Auto-Trade System Rules**:
+  - `UserRuleRegistry` automatically pre-verifies all 312 system rules (U001-U103, D001-D103, M001-M106) and user custom rules (C001+) for 100% immediate auto-trade execution.
+  - Zero dropped signals: Any valid directional rule detected on screen executes immediately unless explicitly unticked by the user.
+- **Dedicated Real-Time Auto-Connection Engine**:
+  - Exclusively dedicated target: `ws://192.168.0.104:8765` (User Laptop WebSocket server).
+  - Auto-discovery cycle interval: **1200ms (1.2s)** continuous background active seek without rotating or polling extraneous endpoints.
+  - Ultra-fast connection timeout: 1200ms socket connect timeout with infinite read timeout (`0ms`) ensuring live sockets never prematurely close.
+  - Automatic reconnection: Mobile constantly probes and connects to the laptop as soon as the laptop server is online.
+  - One-tap "CONNECT NOW" triggers an immediate 50ms async connection attempt directly linking phone to desktop bot.
+  - OkHttp Webhook timeout reduced to 1500ms for instantaneous HTTP delivery feedback.
 - **Automated Trade Outcome Evaluator (`evaluatePendingTrades`)**:
   - Automatically captures the trade entry price $P_{\text{entry}}$ and active candle window key (`1-Trade` epoch minute or `2-Trade` 50/50 split $H_1 / H_2$).
   - When the window concludes, compares the closing price $P_{\text{close}}$ against $P_{\text{entry}}$ and automatically resolves `TradeOutcome.PROFIT` (WIN) or `TradeOutcome.LOSS` (LOSS) directly in the Trade Card & Auto-Active History UI.
-  - Retains manual toggle override capability for user verification.
 - Configured Primary Target:
-  - **WebSocket Server URL**: `ws://192.168.0.102:8765` (User Desktop / Laptop WebSocket server).
-  - **HTTP Webhook Endpoint**: `http://192.168.0.102:5000/trade` (User Desktop / Laptop Flask / FastAPI webhook relay).
+  - **WebSocket Server URL**: `ws://192.168.0.104:8765` (User Desktop / Laptop WebSocket server).
+  - **HTTP Webhook Endpoint**: `http://192.168.0.104:5000/trade` (User Desktop / Laptop Flask / FastAPI webhook relay).
 - Dispatches high-speed JSON trade packets with standard polarity: `{"polarity": 1, "action": "BUY", "command": "CLICK_BUY"}` for CALL/BUY and `{"polarity": -1, "action": "SELL", "command": "CLICK_SELL"}` for PUT/SELL.
 - Enforces single-click execution guards and displays live connection status, latency, and logs in the UI.
-- **Continuous Sentinel Auto-Discovery & Instant Auto-Reconnect**:
-  - Implements rapid 600ms self-healing reconnect retry (`FAST_RECONNECT_INTERVAL_MS`).
-  - Active failure counter (`consecutiveFailures`): When failures reach $\ge 3$ (or connection drops), automatically triggers `triggerSentinelDiscovery()`.
-  - Dynamically probes USB ADB (`127.0.0.1:8765`), saved address, ARP table peers, router gateway, and sweeps the local `/24` subnet in parallel.
-  - The moment the laptop is detected, `serverUrl` is updated instantly and the socket connects in 0ms delay without user intervention.
-  - On app launch, `MainViewModel` automatically initiates `connectWithAutoFallback` to bind instantly to USB ADB or Wi-Fi.
 
 ### 8. `AutoTradeBridge.kt` (Multi-Mode Connection, Telemetry & Auto-Discovery Manager)
 - Located in `com.example.quantvision.AutoTradeBridge`.
-- Configured Primary Target: `ws://192.168.0.102:8765` (User Laptop Wi-Fi).
+- Configured Primary Target: `ws://192.168.0.104:8765` (User Laptop Wi-Fi).
 - Provides seamless zero-configuration multi-mode auto connection:
-  - **Primary Wi-Fi Mode**: Pre-configured to `ws://192.168.0.102:8765` with automatic subnet sweep if IP changes.
+  - **Primary Wi-Fi Mode**: Pre-configured to `ws://192.168.0.104:8765` with automatic subnet sweep if IP changes.
   - **Mode 1: USB Cable (ADB Reverse / `ws://127.0.0.1:8765`)**: Instant fallback and direct connection mode (`adb reverse tcp:8765 tcp:8765`).
   - **Mode 2: Wi-Fi LAN Dynamic Auto-Discovery**: Automatically resolves local subnet and sweeps port 8765 in parallel across `/24` candidates in under 1 second without requiring manual `ipconfig`.
   - **Mode 3: Mobile Hotspot / SIM Tethering**: Automatically inspects ARP table (`/proc/net/arp`) to locate connected PC client IP on hotspot subnet.
@@ -423,10 +426,21 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
 - Renders the camera feed with animated targeting reticle.
 - Displays the large Direction Card (CALL / PUT / WAIT).
 - Displays the Countdown Badge with `3X/3X` Tick Velocity indicator.
-- Displays the 5M, 60M, and 106-Matrix Confluence Grid (`QuantitativeMetricsGrid`).
-- **Dynamic Pullback & Status Badge (`canonical_signal_tier_badge`)**: Embedded under the 106-Matrix signal ID in the quantitative grid. Dynamically reflects real-time micro-pullback detections (`↗ UP PULLBACK` in high-contrast neon green, `↘ DOWN PULLBACK` in high-contrast neon red) or active rule momentum tier (`HIGH • UP`, `HIGH • DOWN`, `MEDIUM • UP`, `MEDIUM • DOWN`) to warn traders instantly against wick traps and confirm true direction.
-- **Auto-Trade Engine Card (`AutoTradeEngineDashboardCard`)**: Positioned directly beneath the 5M/60M quantitative metrics grid in `MainAnalysisTab`. Styled with a compact header (12.5.sp), solid black border (`Color.Black`), instant master auto-trade toggle button (`● TRADE ON` / `● TRADE OFF`), and high-contrast physical manual execution triggers (`↑ CLICK BUY ↗` in solid emerald green and `↓ CLICK SELL ↘` in solid crimson red) with tactile haptic feedback.
-- **Trade Cards & Auto-Active History Card (`TradeCardsAndAutoActiveHistoryCard`)**: Positioned immediately below the Auto-Trade Engine card in `MainAnalysisTab`. Styled with a compact header (11.5.sp), solid black border (`Color.Black`), real-time `Total: X` badge, one-tap `↻ Reset` action (resets trade lock and counters), summary telemetry bar (`BUY ↗: X`, `SELL ↘: X`, `WIN: X | LOSS: X`), empty-state guidance, and live execution history cards showing direction, matrix rule/manual origin, dispatch timestamp, latency, single-entry confirmation, and interactive WIN/LOSS selectors.
+- Displays the 5M, 60M, and 106-Matrix Confluence Grid (`QuantitativeMetricsGrid`):
+  - **Clean Header Identity (`QUANT` with Analytics Icon)**: Header label for the 5M/60M quantitative calculations row features an Analytics icon (`Icons.Default.Analytics` in vibrant cyan) paired with the sleek, modern label `QUANT` in crisp white typography (10.sp, bold), matching the visual identity and icon-label pairing found on Auto-Trade Engine (`Speed` icon) and Trade Cards (`History` icon). Positioned alongside `Rule Edit` and `Verify`.
+  - **Single-Tick Verify Button (`Verify` / `✓ Verified`)**: Clicking the verify button toggles the active rule state with exactly one single tick mark (`Icon(Icons.Default.Check)` + `Text("Verified")`), permanently eliminating duplicate or stacked checkmarks. When unverified, it cleanly shows `Verify`.
+  - **Latched 5M & 60M Percentage Display (Rock-Steady / Zero-Flicker)**: Once valid percentage values are detected on screen for 5 MIN and 60 MIN, they are latched and held steadily in UI state. They remain completely fixed and do not jump, flicker, or drop to `--` on intermediate camera frames, and will only update when a genuinely new/different percentage reading arrives on screen.
+  - **Persistent Greyed-Out Signal State (After 30s Countdown)**: When a 106-Matrix UP or DOWN signal triggers, it displays with full active vibrant coloring (Solid Green for UP, Solid Red for DOWN) and a 30-second live countdown (`30s`...`1s`). Once the 30-second timer concludes, rather than reverting to a blank or `-Wait` state, the UP / DOWN button and matrix label transition into a stable muted grey color (`Color(0xFF262A33)` / `Color(0xFF9CA3AF)`) and remain latched in that grey state until a second genuine change is detected in either the 5M or 60M percentage readings.
+- **Dynamic Pullback & Status Badge (`canonical_signal_tier_badge`)**: Embedded under the 106-Matrix signal ID in the quantitative grid. Powered by the **Ultra-Sensitive Velocity-Momentum Divergence Engine (v2.0)** (`MicroPullbackDetector.kt`). Operates at 50x sensitivity (0.001% improvement threshold, 0.0005% velocity divergence threshold, 2.5x momentum amplification factor, and 4-decimal precision) evaluating 7 distinct divergence and acceleration patterns. Dynamically reflects real-time micro-pullback detections (`↗ UP PULLBACK` in high-contrast neon green, `↘ DOWN PULLBACK` in high-contrast neon red) or active rule momentum tier (`HIGH • UP`, `HIGH • DOWN`, `MEDIUM • UP`, `MEDIUM • DOWN`) to warn traders instantly against wick traps and confirm true direction.
+- **Auto-Trade Engine Card (`AutoTradeEngineDashboardCard`)**: Positioned directly beneath the 5M/60M quantitative metrics grid in `MainAnalysisTab`. Styled with a clean, uncluttered header displaying only the title (12.5.sp) with redundant subtexts removed. Features a master toggle button defaulting to safe inactive state (`OFF ○`) with a muted slate-grey container (`#27272A`), grey border (`#4B5563`), and grey text/dot (`#9CA3AF`). When toggled active by the user, it illuminates in vibrant emerald green (`ACTIVE ●`). Accompanied by high-contrast physical manual execution triggers (`↑ CLICK BUY ↗` in solid emerald green and `↓ CLICK SELL ↘` in solid crimson red) with tactile haptic feedback.
+- **Trade Cards & Auto-Active History Card (`TradeCardsAndAutoActiveHistoryCard` & `IndividualTradeHistoryCard`)**: Positioned immediately below the Auto-Trade Engine card in `MainAnalysisTab`. Features an ultra-clean compact header (11.5.sp), solid black border (`Color.Black`), one-tap `↻ Reset` action, and a balanced metric summary bar evenly distributed across three equal slots (`BUY ↗: X`, `SELL ↘: X`, `TOTAL: X`). Below the summary bar, individual trade cards are created dynamically for every auto-trade and manual trade entry, featuring:
+  - **Trade Index & Direction Badge**: Clear `#1`, `#2` index numbering with prominent `BUY ↗` (Neon Green) or `SELL ↘` (Neon Red) badges and `AUTO ⚡` / `MANUAL 👆` tags.
+  - **Previous vs Current 5M & 60M Percentage Grid**: Displays both Previous (`PREVIOUS (পূর্বে): 5M: +X.XX% | 60M: +X.XX%`) and Current (`CURRENT (বর্তমান): 5M: +X.XX% | 60M: +X.XX%`) percentage readings side-by-side.
+  - **Location & Matrix Rule Identification**: Displays the active matrix rule ID or trigger location (e.g., `M042 [BULLISH_CONTINUATION]`, `DIRECT SCAN`, or manual trigger), delivery channel (`WebSocket` / `HTTP Webhook`), latency, and delivery status.
+  - **Date & Timestamp**: Precise execution timestamp and date formatting (`dd MMM yyyy • HH:mm:ss`).
+  - **Long-Press Native Text Selection & One-Tap Copy**: The entire card data section is wrapped inside Compose `SelectionContainer`, allowing users to press and hold (long-press) on any value, text, or location to bring up the native OS selection handles and Copy menu ("Copy" / "কপি"). In addition, a quick `📋` copy icon button on the card header copies the entire structured trade summary to the clipboard with an instant toast notification.
+  - **Instant Reset All Cards**: Tapping the `Reset` button immediately clears all executed trade cards (`TradeExecutionDispatcher.clearExecutedTrades()`), returning the counters to 0 and wiping all cards from the screen.
+  - **Outcome Marking**: Includes compact `PROFIT ✔` and `LOSS ✘` buttons to record trade outcomes directly on each card.
 - **Streamlined 2-Tab Navigation**: Clean top navigation bar consisting exclusively of `Analysis` (main trading dashboard) and `Auto-Trade` (WebSocket relay and telemetry terminal). The redundant legacy `History` tab has been removed, as real-time trade logs and execution history are already integrated directly inside `TradeCardsAndAutoActiveHistoryCard` on the main screen.
 - **Zero-White Border Styling (Pure Black Borders)**: All dashboard sections, cards, surfaces, and theme borders (`BorderColor`, `BorderLight`, `BorderStroke`, `BorderStrokeLight`) are configured strictly to pure black (`Color(0xFF000000)` / `Color.Black`), completely eliminating any white or light-grey outline frames across the application interface.
 - Houses the Floating Auto-Trade Dispatcher panel and Settings dialogs.

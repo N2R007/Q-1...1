@@ -22,8 +22,8 @@ import kotlinx.coroutines.launch
  * Enforces:
  * 1. Single outbound dispatch per CanonicalDecision fingerprint to prevent duplicate signals.
  * 2. Dual-fallback network architecture:
- *    - Primary Communication: WebSocket (ws://192.168.0.102:8765) for lowest latency (<5ms).
- *    - Secondary Communication: HTTP POST Webhook (http://192.168.0.102:5000/trade) as an immediate fallback.
+ *    - Primary Communication: WebSocket (ws://192.168.0.104:8765) for lowest latency (<5ms).
+ *    - Secondary Communication: HTTP POST Webhook (http://192.168.0.104:5000/trade) as an immediate fallback.
  *    - Execution Logic: Attempts transmission via WebSocket. If WebSocket is disconnected or times out
  *      (>500ms), it immediately and asynchronously sends an HTTP POST to Webhook without blocking UI.
  * 3. Strict validation of executionEligibility before dispatch.
@@ -54,7 +54,12 @@ object TradeExecutionDispatcher {
         val channel: String,
         val status: RelayDeliveryStatus = RelayDeliveryStatus.DELIVERED,
         val latencyMs: Long = 0L,
-        val outcome: TradeOutcome? = null
+        val outcome: TradeOutcome? = null,
+        val prev5m: Double? = null,
+        val prev60m: Double? = null,
+        val current5m: Double? = null,
+        val current60m: Double? = null,
+        val matrixOrLocation: String? = null
     )
 
     private val _executedTrades = MutableStateFlow<List<ExecutedTradeRecord>>(emptyList())
@@ -127,14 +132,19 @@ object TradeExecutionDispatcher {
 
     /**
      * Dispatches a CanonicalDecision using strict single-outbound execution.
-     * Primary: WebSocket (ws://192.168.0.102:8765) for instant single click (<5ms).
-     * Fallback: HTTP Webhook (http://192.168.0.102:5000/trade) ONLY if WebSocket is disconnected or send fails.
+     * Primary: WebSocket (ws://192.168.0.104:8765) for instant single click (<5ms).
+     * Fallback: HTTP Webhook (http://192.168.0.104:5000/trade) ONLY if WebSocket is disconnected or send fails.
      * Guaranteed: Exactly ONE entry per trade signal.
      */
     fun dispatchDecision(
         decision: CanonicalDecision,
         investmentAmount: Double,
-        availableTimeframes: Set<String> = emptySet()
+        availableTimeframes: Set<String> = emptySet(),
+        prev5m: Double? = null,
+        prev60m: Double? = null,
+        current5m: Double? = null,
+        current60m: Double? = null,
+        matrixOrLocation: String? = null
     ): Boolean {
         if (!decision.executionEligibility) {
             Log.d(TAG, "Dispatch rejected: decision is not execution-eligible (${decision.explanation})")
@@ -234,7 +244,12 @@ object TradeExecutionDispatcher {
                         timestamp = event.timestamp,
                         channel = "WebSocket",
                         status = RelayDeliveryStatus.DELIVERED,
-                        latencyMs = latency
+                        latencyMs = latency,
+                        prev5m = prev5m,
+                        prev60m = prev60m,
+                        current5m = current5m,
+                        current60m = current60m,
+                        matrixOrLocation = matrixOrLocation ?: decision.primaryMatrixTitle ?: decision.primaryMatrixId
                     )
                 )
             } else {
@@ -254,7 +269,12 @@ object TradeExecutionDispatcher {
                         timestamp = event.timestamp,
                         channel = "HTTP Webhook",
                         status = RelayDeliveryStatus.DELIVERED,
-                        latencyMs = latency
+                        latencyMs = latency,
+                        prev5m = prev5m,
+                        prev60m = prev60m,
+                        current5m = current5m,
+                        current60m = current60m,
+                        matrixOrLocation = matrixOrLocation ?: decision.primaryMatrixTitle ?: decision.primaryMatrixId
                     )
                 )
             }
@@ -265,11 +285,19 @@ object TradeExecutionDispatcher {
 
     /**
      * Manual Trade Dispatch for BUY and SELL UI buttons.
-     * Primary: WebSocket (ws://192.168.0.102:8765).
-     * Fallback: HTTP Webhook (http://192.168.0.102:5000/trade) ONLY if WS is disconnected.
+     * Primary: WebSocket (ws://192.168.0.104:8765).
+     * Fallback: HTTP Webhook (http://192.168.0.104:5000/trade) ONLY if WS is disconnected.
      * Guaranteed: Single entry, protected by debouncing.
      */
-    fun dispatchManualTrade(command: String, investmentAmount: Double = 100.0) {
+    fun dispatchManualTrade(
+        command: String,
+        investmentAmount: Double = 100.0,
+        prev5m: Double? = null,
+        prev60m: Double? = null,
+        current5m: Double? = null,
+        current60m: Double? = null,
+        matrixOrLocation: String? = null
+    ) {
         val normalized = when (command.trim().uppercase(java.util.Locale.US)) {
             "UP", "BUY", "CLICK_BUY" -> "CLICK_BUY"
             "DOWN", "SELL", "CLICK_SELL" -> "CLICK_SELL"
@@ -343,7 +371,12 @@ object TradeExecutionDispatcher {
                         timestamp = event.timestamp,
                         channel = "WebSocket",
                         status = RelayDeliveryStatus.DELIVERED,
-                        latencyMs = latency
+                        latencyMs = latency,
+                        prev5m = prev5m,
+                        prev60m = prev60m,
+                        current5m = current5m,
+                        current60m = current60m,
+                        matrixOrLocation = matrixOrLocation ?: "MANUAL EXECUTION"
                     )
                 )
             } else {
@@ -367,7 +400,12 @@ object TradeExecutionDispatcher {
                         timestamp = event.timestamp,
                         channel = "HTTP Webhook",
                         status = RelayDeliveryStatus.DELIVERED,
-                        latencyMs = latency
+                        latencyMs = latency,
+                        prev5m = prev5m,
+                        prev60m = prev60m,
+                        current5m = current5m,
+                        current60m = current60m,
+                        matrixOrLocation = matrixOrLocation ?: "MANUAL EXECUTION"
                     )
                 )
             }

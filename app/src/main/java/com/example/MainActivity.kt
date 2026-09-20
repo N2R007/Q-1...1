@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
         com.example.data.matrix.UserRuleRegistry.init(applicationContext)
         com.example.network.WebSocketTradeRelay.init(applicationContext)
 
-        // Initialize local trading relay endpoints (192.168.0.102) and start Bluetooth-style auto-seeking
+        // Initialize local trading relay endpoints (192.168.0.104) and start Bluetooth-style auto-seeking
         com.example.network.HttpTradeRelay.webhookUrl = com.example.network.HttpTradeRelay.DEFAULT_HTTP_URL
         com.example.network.WebSocketTradeRelay.serverUrl = com.example.network.WebSocketTradeRelay.DEFAULT_SERVER_URL
         com.example.network.WebSocketTradeRelay.start()

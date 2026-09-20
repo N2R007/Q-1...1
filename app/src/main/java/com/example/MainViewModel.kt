@@ -80,6 +80,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         AnalyzerUiState(
             apiKey = defaultApiKey,
             scanIntervalMs = 10L,
+            isAutoTradeEnabled = false,
             selectedTestImageId = null,
             engineMode = EngineMode.LOCAL,
             statusMessage = "LIVE OCR SCANNING"
@@ -1377,7 +1378,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val dispatched = com.example.network.TradeExecutionDispatcher.dispatchDecision(
                 decision = decisionToDispatch,
                 investmentAmount = investmentAmount,
-                availableTimeframes = availableTfs
+                availableTimeframes = availableTfs,
+                prev5m = previousConfirmed5m,
+                prev60m = previousConfirmed60m,
+                current5m = v5,
+                current60m = v60,
+                matrixOrLocation = "$cleanRuleId [$ruleTitle]"
             )
 
             if (dispatched) {

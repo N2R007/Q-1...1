@@ -844,6 +844,8 @@ class PullbackDurationTest {
         val analysis = TradingAnalysis(
             isValid = true,
             isNoTradeZone = true,
+            change5mValue = 0.05,
+            change60mValue = 0.05,
             direction = TradeDirection.NEUTRAL
         )
         val pred = calculateQuickPrediction(analysis)
