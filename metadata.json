@@ -1,0 +1,10 @@
+{
+  "name": "Q Scan",
+  "description": "Quantitative vision scanner and real-time market analysis assistant powered by Gemini Vision.",
+  "requestFramePermissions": [
+    "android.permission.CAMERA"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
