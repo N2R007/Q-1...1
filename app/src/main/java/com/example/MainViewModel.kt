@@ -124,6 +124,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var consecutiveUnchangedFrames = 0
     private var consecutiveMissingCoreFrames = 0
 
+    // Persistent Latch Memory for 5m & 60m: survives camera shakes, movements, and temporary occlusions.
+    // Mandated by user: once 5m and 60m percentages are detected, if camera shakes and re-detects them,
+    // recognize that they were already detected and DO NOT fire duplicate trades or UP/DOWN signals!
+    private var lastConfirmed5mValue: Double? = null
+    private var lastConfirmed60mValue: Double? = null
+    private var lastConfirmed1dValue: Double? = null
+
     // Stateful tracking for Momentum Loss & Top/Bottom Fakeout zero-crossing detection
     private var previousConfirmed5m: Double? = null
     private var previousConfirmed60m: Double? = null
@@ -376,6 +383,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingCandidateCount = 0
         consecutiveUnchangedFrames = 0
         consecutiveMissingCoreFrames = 0
+        lastConfirmed5mValue = null
+        lastConfirmed60mValue = null
+        lastConfirmed1dValue = null
         previousConfirmed5m = null
         previousConfirmed60m = null
         previousConfirmed1d = null
@@ -497,6 +507,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pendingCandidateMetrics = null
         pendingCandidateCount = 0
         rollingMetricHistory.clear()
+        lastConfirmed5mValue = null
+        lastConfirmed60mValue = null
+        lastConfirmed1dValue = null
         previousConfirmed5m = null
         previousConfirmed60m = null
         previousConfirmed1d = null
@@ -947,10 +960,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val isCoreUnchanged = lastStableMetrics != null &&
                             isExactSameNumber(lastStableMetrics?.val5m, v5) &&
                             isExactSameNumber(lastStableMetrics?.val60m, v60)
+
+                    // Camera Shake & State Transition Guard (Mandated by user):
+                    // If 5m and 60m match previously confirmed values, recognize that they were already detected
+                    // ("বুঝে নিবেন এটা একবার ডিটেক্ট করা হয়েছিল") and do NOT fire duplicate trades or UP/DOWN signals!
+                    val isSameAsPreviouslyDetected = lastConfirmed5mValue != null &&
+                            isExactSameNumber(lastConfirmed5mValue, v5) &&
+                            isExactSameNumber(lastConfirmed60mValue, v60)
+
+                    val isUnchangedOrAlreadyDetected = isCoreUnchanged || isSameAsPreviouslyDetected
                     val is1dChanged = !isExactSameNumber(lastStableMetrics?.val1d, v1d)
 
-                    if (isCoreUnchanged) {
+                    if (isUnchangedOrAlreadyDetected) {
                         consecutiveUnchangedFrames++
+                        lastStableMetrics = currentMetrics
+                        previousConfirmed5m = v5
+                        previousConfirmed60m = v60
+
                         if (is1dChanged && prev != null) {
                             // 1-day metric and context text update with audio alert on change
                             val str1d = v1d?.let { com.example.data.analyzer.TradingOutputParser.formatWithSign(it) } ?: "--"
@@ -998,14 +1024,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         pendingCandidateMetrics = null
                         pendingCandidateCount = 0
 
-                        // Immediate Auto-Trade evaluation: Ensures trades are dispatched with 0ms latency even when numbers are stable
-                        evaluateAndDispatchAutoTrade(
-                            analysis = prev ?: result,
-                            v5 = v5,
-                            v60 = v60,
-                            v1d = v1d,
-                            investmentAmount = currentState.investmentAmount
-                        )
+                        // Note: Auto-trade is NEVER fired when percentages are unchanged or re-detected after camera shake!
+                        // As strictly instructed by user: "যতক্ষণ না পাঁচ মিনিট ৬০ মিনিট যেকোনো একটি পার্সেন্টেজের পরিবর্তন হবে ততক্ষণ কোন আপডাউন সিগনাল দিবে না"
 
                         // If returning from an approximate frame to confirmed stable values with a verified frame:
                         // restore the verified state on currentAnalysis without triggering duplicate audio
@@ -1025,10 +1045,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
 
+                        // Ensure UI maintains valid analysis with current 5m/60m readings across camera shake recovery
+                        val analysisToKeep = if (prev != null && prev.isValid) {
+                            prev
+                        } else {
+                            result.copy(
+                                isSuccess = true,
+                                isValid = true,
+                                audioEvent = com.example.audio.AudioSignalEngine.SOUND_NONE,
+                                hasValueChanged = false
+                            )
+                        }
+
                         val currentStatus = if (currentState.cooldownRemainingSeconds > 0 && currentState.engineMode == EngineMode.CLOUD) {
                             "COOLDOWN (${currentState.cooldownRemainingSeconds}s)"
                         } else if (currentState.isScanning) {
-                            "LIVE OCR • মান অপরিবর্তিত"
+                            if (isSameAsPreviouslyDetected && !isCoreUnchanged) "LIVE OCR • মান অপরিবর্তিত (পূর্বের শনাক্ত মান)" else "LIVE OCR • মান অপরিবর্তিত"
                         } else {
                             "PAUSED"
                         }
@@ -1037,7 +1069,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         return@update currentState.copy(
                             isProcessing = false,
                             statusMessage = currentStatus,
-                            currentAnalysis = prev,
+                            currentAnalysis = analysisToKeep,
                             error = null
                         )
                     }
@@ -1092,6 +1124,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     if (isCandidateValidAndVerified) {
                         lastStableMetrics = currentMetrics
+                        lastConfirmed5mValue = v5
+                        lastConfirmed60mValue = v60
+                        lastConfirmed1dValue = v1d
                         previousConfirmed5m = v5
                         previousConfirmed60m = v60
                         previousConfirmed1d = v1d
@@ -1318,7 +1353,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // 100% MANDATORY STRICT USER MANDATE:
         // "QUANTএই সেকশনে ডান পাশে আপ এবং ডাউন সিগনাল যতক্ষণ না আসবে ততক্ষণ কোন অটো ট্রেড ফায়ার করা যাবে না"
-        // The right button of the QUANT section is driven STRICTLY by Authorized106MatrixEngine with 30s active countdown.
+        // The right button of the QUANT section is driven STRICTLY by Authorized106MatrixEngine with 10s active countdown.
         // If the button shows "-Wait" or the countdown is inactive/expired: STRICTLY BLOCK ALL AUTO-TRADES!
         if (!_isQuantSignalActive.value || _quantActiveSignal.value == null) {
             return

@@ -99,14 +99,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -281,130 +285,133 @@ fun MainAnalysisTab(
     val executedTrades by TradeExecutionDispatcher.executedTrades.collectAsState()
     val haptic = LocalHapticFeedback.current
 
-    LazyColumn(
+    Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Cooldown Banner if rate-limited
         if (uiState.cooldownRemainingSeconds > 0) {
-            item {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("rate_limit_cooldown_banner"),
-                    shape = RoundedCornerShape(16.dp),
-                    color = DarkSurfaceVariant,
-                    border = BorderStroke(1.dp, AccentCyan.copy(alpha = 0.6f))
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("rate_limit_cooldown_banner"),
+                shape = RoundedCornerShape(16.dp),
+                color = DarkSurfaceVariant,
+                border = BorderStroke(1.dp, AccentCyan.copy(alpha = 0.6f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            progress = {
-                                if (uiState.cooldownTotalSeconds > 0) {
-                                    (uiState.cooldownRemainingSeconds.toFloat() / uiState.cooldownTotalSeconds.toFloat())
-                                } else 0f
-                            },
-                            modifier = Modifier.size(28.dp),
+                    CircularProgressIndicator(
+                        progress = {
+                            if (uiState.cooldownTotalSeconds > 0) {
+                                (uiState.cooldownRemainingSeconds.toFloat() / uiState.cooldownTotalSeconds.toFloat())
+                            } else 0f
+                        },
+                        modifier = Modifier.size(28.dp),
+                        color = AccentCyan,
+                        strokeWidth = 3.dp,
+                        trackColor = BorderStrokeLight
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "API RATE LIMIT COOLDOWN",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
                             color = AccentCyan,
-                            strokeWidth = 3.dp,
-                            trackColor = BorderStrokeLight
+                            letterSpacing = 0.5.sp
                         )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "API RATE LIMIT COOLDOWN",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                color = AccentCyan,
-                                letterSpacing = 0.5.sp
-                            )
-                            Text(
-                                text = "Auto-scan will resume in ${uiState.cooldownRemainingSeconds}s.",
-                                fontSize = 11.sp,
-                                color = TextPrimary
-                            )
-                        }
+                        Text(
+                            text = "Auto-scan will resume in ${uiState.cooldownRemainingSeconds}s.",
+                            fontSize = 11.sp,
+                            color = TextPrimary
+                        )
                     }
                 }
             }
         }
 
-        // High Density Section Header + Side-by-Side Grid (গাণিতিক হিসাব ANALYSIS + ১০৬ ম্যাট্রিক্স সিগন্যাল)
-        item {
-            QuantitativeMetricsGrid(
-                analysis = analysis,
-                history = uiState.history,
-                isAudioAlertEnabled = uiState.isAudioAlertEnabled,
-                onQuantSignalChanged = onQuantSignalChanged
-            )
-        }
+        // 1. PINNED & FIXED: Quantitative Metrics Grid (গাণিতিক হিসাব ANALYSIS + ১০৬ ম্যাট্রিক্স সিগন্যাল)
+        // Stays permanently pinned at the top without moving when scrolling history
+        QuantitativeMetricsGrid(
+            analysis = analysis,
+            history = uiState.history,
+            isAudioAlertEnabled = uiState.isAudioAlertEnabled,
+            onQuantSignalChanged = onQuantSignalChanged
+        )
 
-        // 1. Auto-Trade Engine Card (from user screenshot: ▲ Auto-Trade Engine | [↑ CLICK BUY ↗] [↓ CLICK SELL ↘])
-        item {
-            AutoTradeEngineDashboardCard(
-                isAutoTradeEnabled = uiState.isAutoTradeEnabled,
-                onToggleAutoTrade = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onToggleAutoTrade()
-                },
-                onManualBuy = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    val prev5m = uiState.history.firstOrNull { it.isValid && it.change5mValue != null }?.change5mValue
-                    val prev60m = uiState.history.firstOrNull { it.isValid && it.change60mValue != null }?.change60mValue
-                    TradeExecutionDispatcher.dispatchManualTrade(
-                        command = "CLICK_BUY",
-                        investmentAmount = 100.0,
-                        prev5m = prev5m,
-                        prev60m = prev60m,
-                        current5m = analysis?.change5mValue,
-                        current60m = analysis?.change60mValue,
-                        matrixOrLocation = analysis?.primaryMatrixId ?: "MANUAL BUY"
-                    )
-                },
-                onManualSell = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    val prev5m = uiState.history.firstOrNull { it.isValid && it.change5mValue != null }?.change5mValue
-                    val prev60m = uiState.history.firstOrNull { it.isValid && it.change60mValue != null }?.change60mValue
-                    TradeExecutionDispatcher.dispatchManualTrade(
-                        command = "CLICK_SELL",
-                        investmentAmount = 100.0,
-                        prev5m = prev5m,
-                        prev60m = prev60m,
-                        current5m = analysis?.change5mValue,
-                        current60m = analysis?.change60mValue,
-                        matrixOrLocation = analysis?.primaryMatrixId ?: "MANUAL SELL"
+        // 2. PINNED & FIXED: Auto-Trade Engine Card (মাস্টার টগল ও ম্যানুয়াল বাই/সেল বাটন)
+        // Stays permanently pinned in place; history cards slide underneath this card
+        AutoTradeEngineDashboardCard(
+            isAutoTradeEnabled = uiState.isAutoTradeEnabled,
+            onToggleAutoTrade = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onToggleAutoTrade()
+            },
+            onManualBuy = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val prev5m = uiState.history.firstOrNull { it.isValid && it.change5mValue != null }?.change5mValue
+                val prev60m = uiState.history.firstOrNull { it.isValid && it.change60mValue != null }?.change60mValue
+                TradeExecutionDispatcher.dispatchManualTrade(
+                    command = "CLICK_BUY",
+                    investmentAmount = 100.0,
+                    prev5m = prev5m,
+                    prev60m = prev60m,
+                    current5m = analysis?.change5mValue,
+                    current60m = analysis?.change60mValue,
+                    matrixOrLocation = analysis?.primaryMatrixId ?: "MANUAL BUY"
+                )
+            },
+            onManualSell = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                val prev5m = uiState.history.firstOrNull { it.isValid && it.change5mValue != null }?.change5mValue
+                val prev60m = uiState.history.firstOrNull { it.isValid && it.change60mValue != null }?.change60mValue
+                TradeExecutionDispatcher.dispatchManualTrade(
+                    command = "CLICK_SELL",
+                    investmentAmount = 100.0,
+                    prev5m = prev5m,
+                    prev60m = prev60m,
+                    current5m = analysis?.change5mValue,
+                    current60m = analysis?.change60mValue,
+                    matrixOrLocation = analysis?.primaryMatrixId ?: "MANUAL SELL"
+                )
+            }
+        )
+
+        // 3. SCROLLABLE HISTORY SECTION: Trade Cards & Auto-Active History
+        // When scrolled, history cards glide smoothly under the Auto-Trade Engine card with crisp clipping
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clipToBounds()
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    TradeCardsAndAutoActiveHistoryCard(
+                        executedTrades = executedTrades,
+                        analysisHistory = uiState.history,
+                        onReset = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            TradeExecutionDispatcher.clearExecutedTrades()
+                            onResetTradeLock()
+                            onResetSessionPnl()
+                        },
+                        onSetExecutedTradeOutcome = { id, outcome ->
+                            TradeExecutionDispatcher.setTradeRecordOutcome(id, outcome)
+                        },
+                        onSetHistoryItemOutcome = onSetHistoryItemOutcome
                     )
                 }
-            )
-        }
-
-        // 2. Trade Cards & Auto-Active History Card (from user screenshot: 🕒 Trade Cards & Auto-Active History | Total: 0 | Reset)
-        item {
-            TradeCardsAndAutoActiveHistoryCard(
-                executedTrades = executedTrades,
-                analysisHistory = uiState.history,
-                onReset = {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    TradeExecutionDispatcher.clearExecutedTrades()
-                    onResetTradeLock()
-                    onResetSessionPnl()
-                },
-                onSetExecutedTradeOutcome = { id, outcome ->
-                    TradeExecutionDispatcher.setTradeRecordOutcome(id, outcome)
-                },
-                onSetHistoryItemOutcome = onSetHistoryItemOutcome
-            )
-        }
-
-        // Three-Timeframe Pressure Engine Card (ফলাফল সেকশন)
-        // Hidden per user requirement: "ফলাফল সেকশনটা সম্পূর্ণভাবে হাইড করে দেন আমি আপনাকে একটি স্ক্রিনশট দিলাম দেখতে এমন হবে উদাহরণস্বরূপ"
-
-        // Hidden per user requirement: Prediction card below history is removed so TradeCardsAndAutoActiveHistoryCard is cleanly at the bottom.
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
         }
     }
 }
@@ -911,7 +918,7 @@ fun QuantitativeMetricsGrid(
             activeSignal = evaluatedMatch
             signalTimestamp = now
             isSignalActive = true
-            remainingSeconds = 30
+            remainingSeconds = 10
             onQuantSignalChanged(evaluatedMatch, true, analysis)
 
             if (!isDuplicate) {
@@ -941,13 +948,13 @@ fun QuantitativeMetricsGrid(
         }
     }
 
-    // 30-second countdown timer: Once expired, becomes inactive (greyed out) and stays grey until a second 5m/60m change occurs
+    // 10-second countdown timer: Once expired, becomes inactive (greyed out) and stays grey until a second 5m/60m change occurs
     LaunchedEffect(signalTimestamp) {
         if (signalTimestamp > 0L) {
             isSignalActive = true
             while (true) {
                 val elapsed = System.currentTimeMillis() - signalTimestamp
-                val remainingMs = 30_000L - elapsed
+                val remainingMs = 10_000L - elapsed
                 if (remainingMs <= 0L) {
                     isSignalActive = false
                     remainingSeconds = 0
@@ -1296,165 +1303,119 @@ fun QuantitativeMetricsGrid(
                     }
                 }
 
-                // Bottom row: Matched Matrix ID flanked by 5m (left) and 60m (right) real strength arrows
+                // Bottom rows: Sleek Matrix ID Micro-Chip and Status/Pullback Badge
                 val v5 = latched5mValue ?: analysis?.change5mValue ?: 0.0
                 val v60 = latched60mValue ?: analysis?.change60mValue ?: 0.0
                 val str5 = kotlin.math.abs(v5)
                 val str60 = kotlin.math.abs(v60)
-
                 val is5mStronger = str5 > str60 && str5 > 0.0001
                 val is60mStronger = str60 > str5 && str60 > 0.0001
 
-                // Verification checkmark logic:
-                // Signal is verified (✓) ONLY when data quality is VERIFIED, non-approximate, valid 5m/60m, and uncancelled.
-                val isVerifiedSignal = isSignalActive &&
-                        activeSignal != null &&
-                        (activeSignal?.direction == TradeDirection.UP || activeSignal?.direction == TradeDirection.DOWN) &&
-                        analysis != null &&
-                        analysis.isValid &&
-                        analysis.isSuccess &&
-                        analysis.dataQuality == DataQualityState.VERIFIED &&
-                        !analysis.isApproximate &&
-                        !analysis.isProvisional &&
-                        !analysis.isNoTradeZone &&
-                        !analysis.isWarningOnly &&
-                        analysis.change5mValue != null &&
-                        analysis.change60mValue != null &&
-                        analysis.canonicalDecision?.cancelledMatrixIds?.contains(activeSignal?.id) != true
+                // Verified Tick Mark (✓) displayed when signal is verified in UserRuleRegistry
+                val isRuleUserVerified = (activeSignal?.id ?: analysis?.primaryMatrixId ?: analysis?.canonicalDecision?.primaryMatrixId)?.let {
+                    val cleanId = it.replace("[", "").replace("]", "").trim()
+                    refreshVerifiedState.let { }
+                    UserRuleRegistry.isRuleVerified(cleanId)
+                } ?: false
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.clickable { showRuleManagerDialog = true }
+                val microPrediction = analysis?.microMovementPrediction
+                val isPullbackActive = microPrediction?.hasPrediction == true && microPrediction.microPullback != com.example.data.analyzer.NextMovementBias.UNKNOWN
+
+                // Row 1: Unified Matrix ID Micro-Chip
+                Surface(
+                    shape = RoundedCornerShape(5.dp),
+                    color = Color(0xFF141720),
+                    border = BorderStroke(
+                        0.8.dp,
+                        if (isSignalActive) activeColor.copy(alpha = 0.55f) else Color(0xFF2D3343)
+                    ),
+                    modifier = Modifier
+                        .clickable { showRuleManagerDialog = true }
+                        .testTag("matrix_chip_container")
                 ) {
-                    // Left Slot: 5 min real strength indicator (only shown if 5m is stronger)
-                    Box(
-                        modifier = Modifier.width(13.dp),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
+                        // 5m real strength arrow (Left side: shown whenever 5m dominates in real-time)
                         if (is5mStronger) {
                             Text(
                                 text = if (v5 >= 0) "▲" else "▼",
                                 color = if (v5 >= 0) NeonGreenLight else NeonRedLight,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Black
                             )
+                            Spacer(modifier = Modifier.width(3.5.dp))
                         }
-                    }
 
-                    Spacer(modifier = Modifier.width(2.dp))
+                        // Center: Matched Matrix ID (e.g. [D061] or [M152])
+                        val matrixLabel = if (activeSignal != null) "[${activeSignal?.id}]" else "--"
+                        Text(
+                            text = matrixLabel,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isSignalActive) activeColorLight else TextMuted,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 0.3.sp,
+                            maxLines = 1
+                        )
 
-                    // Center: Matched Matrix ID (e.g. [D061] or [M152])
-                    val matrixLabel = if (activeSignal != null) "[${activeSignal?.id}]" else "--"
-                    Text(
-                        text = matrixLabel,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSignalActive) activeColorLight else TextMuted,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1
-                    )
-
-                    Spacer(modifier = Modifier.width(2.dp))
-
-                    // Right Slot: 60 min real strength indicator (only shown if 60m is stronger)
-                    Box(
-                        modifier = Modifier.width(13.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                        // 60m real strength arrow (Right side: shown whenever 60m dominates in real-time)
                         if (is60mStronger) {
+                            Spacer(modifier = Modifier.width(3.5.dp))
                             Text(
                                 text = if (v60 >= 0) "▲" else "▼",
                                 color = if (v60 >= 0) NeonGreenLight else NeonRedLight,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Black
                             )
                         }
-                    }
 
-                    // Verified Tick Mark (✓) displayed when signal is verified in UserRuleRegistry
-                    val isRuleUserVerified = (activeSignal?.id ?: analysis?.primaryMatrixId ?: analysis?.canonicalDecision?.primaryMatrixId)?.let {
-                        val cleanId = it.replace("[", "").replace("]", "").trim()
-                        refreshVerifiedState.let { }
-                        UserRuleRegistry.isRuleVerified(cleanId)
-                    } ?: false
-
-                    if (isRuleUserVerified) {
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "✓",
-                            color = if (isSignalActive) NeonGreenLight else TextMuted,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.testTag("signal_verified_tick")
-                        )
-                    }
-
-                    // Micro-Movement Pullback Indicator (NON-INTRUSIVE ADDITION)
-                    // Shows small arrows next to matrix ID when micro pullback is detected
-                    val microPrediction = analysis?.microMovementPrediction
-                    if (microPrediction?.hasPrediction == true && microPrediction.microPullback != com.example.data.analyzer.NextMovementBias.UNKNOWN) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(1.dp)
-                        ) {
-                            // Micro pullback direction indicator
-                            val microIcon = when (microPrediction.microPullback) {
-                                com.example.data.analyzer.NextMovementBias.UP -> "↗"
-                                com.example.data.analyzer.NextMovementBias.DOWN -> "↘"
-                                else -> "?"
-                            }
-                            val microColor = when (microPrediction.microPullback) {
-                                com.example.data.analyzer.NextMovementBias.UP -> NeonGreen
-                                com.example.data.analyzer.NextMovementBias.DOWN -> NeonRed
-                                else -> TextMuted
-                            }
-                            
+                        // Verified Checkmark (✓)
+                        if (isRuleUserVerified) {
+                            Spacer(modifier = Modifier.width(3.5.dp))
                             Text(
-                                text = microIcon,
-                                color = microColor,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.testTag("micro_pullback_indicator")
+                                text = "✓",
+                                color = NeonGreenLight,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.testTag("signal_verified_tick")
                             )
                         }
                     }
                 }
 
-                // Dynamic Status & Pullback Badge (Option 1):
-                // When pullback is detected: ↗ UP PULLBACK / ↘ DOWN PULLBACK
-                // When normal: HIGH • UP / HIGH • DOWN / MEDIUM • UP / MEDIUM • DOWN
+                // Row 2: Clean Dynamic Status & Pullback Badge
                 val matchedRuleId = activeSignal?.id ?: analysis?.primaryMatrixId ?: analysis?.canonicalDecision?.primaryMatrixId
-                val baseTier = if (isSignalActive && !matchedRuleId.isNullOrBlank()) {
-                    UserRuleRegistry.getRuleTierSimple(matchedRuleId)
-                } else if (!matchedRuleId.isNullOrBlank()) {
+                val baseTier = if (!matchedRuleId.isNullOrBlank()) {
                     UserRuleRegistry.getRuleTierSimple(matchedRuleId)
                 } else ""
                 val signalDirection = activeSignal?.direction ?: analysis?.direction ?: analysis?.canonicalDecision?.direction
-                val microPrediction = analysis?.microMovementPrediction
-                val isPullbackActive = microPrediction?.hasPrediction == true && microPrediction.microPullback != com.example.data.analyzer.NextMovementBias.UNKNOWN
 
                 val dynamicBadgeText: String = when {
-                    isPullbackActive && microPrediction?.microPullback == com.example.data.analyzer.NextMovementBias.UP -> "↗ UP PULLBACK"
-                    isPullbackActive && microPrediction?.microPullback == com.example.data.analyzer.NextMovementBias.DOWN -> "↘ DOWN PULLBACK"
-                    baseTier.isNotEmpty() && signalDirection == TradeDirection.UP -> "$baseTier • UP"
-                    baseTier.isNotEmpty() && signalDirection == TradeDirection.DOWN -> "$baseTier • DOWN"
+                    isPullbackActive -> "PULLBACK"
+                    baseTier.isNotEmpty() && (signalDirection == TradeDirection.UP || signalDirection == TradeDirection.DOWN) -> "$baseTier ${if (signalDirection == TradeDirection.UP) "UP" else "DOWN"}"
                     baseTier.isNotEmpty() -> baseTier
                     isSignalActive && signalDirection == TradeDirection.UP -> "UP"
                     isSignalActive && signalDirection == TradeDirection.DOWN -> "DOWN"
                     else -> ""
                 }
 
+                val isArrowUp = (isPullbackActive && microPrediction?.microPullback == com.example.data.analyzer.NextMovementBias.UP) ||
+                        (!isPullbackActive && signalDirection == TradeDirection.UP)
+                val isArrowDown = (isPullbackActive && microPrediction?.microPullback == com.example.data.analyzer.NextMovementBias.DOWN) ||
+                        (!isPullbackActive && signalDirection == TradeDirection.DOWN)
+
                 if (dynamicBadgeText.isNotEmpty()) {
                     val isPbUp = isPullbackActive && microPrediction?.microPullback == com.example.data.analyzer.NextMovementBias.UP
                     val isPbDown = isPullbackActive && microPrediction?.microPullback == com.example.data.analyzer.NextMovementBias.DOWN
-                    val isUp = isPbUp || signalDirection == TradeDirection.UP
-                    val isDown = isPbDown || signalDirection == TradeDirection.DOWN
+                    val isUp = isPbUp || (!isPbDown && signalDirection == TradeDirection.UP)
+                    val isDown = isPbDown || (!isPbUp && signalDirection == TradeDirection.DOWN)
 
                     val badgeBg = when {
-                        isPbUp || (isUp && baseTier == "HIGH") -> NeonGreenDim
-                        isPbDown || (isDown && baseTier == "HIGH") -> NeonRedDim
+                        isPbUp -> NeonGreenDim
+                        isPbDown -> NeonRedDim
                         isUp -> NeonGreenDim
                         isDown -> NeonRedDim
                         baseTier == "MEDIUM" -> AccentCyan.copy(alpha = 0.15f)
@@ -1462,8 +1423,8 @@ fun QuantitativeMetricsGrid(
                     }
 
                     val badgeBorderColor = when {
-                        isPbUp -> NeonGreen.copy(alpha = 0.85f)
-                        isPbDown -> NeonRed.copy(alpha = 0.85f)
+                        isPbUp -> NeonGreen.copy(alpha = 0.7f)
+                        isPbDown -> NeonRed.copy(alpha = 0.7f)
                         isUp -> NeonGreen.copy(alpha = 0.7f)
                         isDown -> NeonRed.copy(alpha = 0.7f)
                         baseTier == "MEDIUM" -> AccentCyan.copy(alpha = 0.7f)
@@ -1471,29 +1432,65 @@ fun QuantitativeMetricsGrid(
                     }
 
                     val badgeTextColor = when {
-                        isPbUp || isUp -> NeonGreenLight
-                        isPbDown || isDown -> NeonRedLight
+                        isPbUp -> NeonGreenLight
+                        isPbDown -> NeonRedLight
+                        isUp -> NeonGreenLight
+                        isDown -> NeonRedLight
                         baseTier == "MEDIUM" -> AccentCyan
                         else -> TextMuted
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(3.dp),
+                        shape = RoundedCornerShape(4.dp),
                         color = badgeBg,
-                        border = BorderStroke(0.5.dp, badgeBorderColor),
+                        border = BorderStroke(0.6.dp, badgeBorderColor),
                         modifier = Modifier
                             .testTag("canonical_signal_tier_badge")
                             .clickable { showRuleManagerDialog = true }
                     ) {
-                        Text(
-                            text = dynamicBadgeText,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            color = badgeTextColor,
-                            letterSpacing = 0.5.sp,
-                            modifier = Modifier.padding(horizontal = 4.5.dp, vertical = 0.5.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (isPullbackActive) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = "Pullback Warning",
+                                    tint = badgeTextColor,
+                                    modifier = Modifier
+                                        .size(10.5.dp)
+                                        .testTag("micro_pullback_indicator")
+                                )
+                                Spacer(modifier = Modifier.width(3.5.dp))
+                            }
+                            Text(
+                                text = dynamicBadgeText,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                color = badgeTextColor,
+                                letterSpacing = 0.4.sp,
+                                maxLines = 1
+                            )
+                            if (isArrowUp) {
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ArrowUpward,
+                                    contentDescription = "Upward",
+                                    tint = badgeTextColor,
+                                    modifier = Modifier.size(11.5.dp)
+                                )
+                            } else if (isArrowDown) {
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDownward,
+                                    contentDescription = "Downward",
+                                    tint = badgeTextColor,
+                                    modifier = Modifier.size(11.5.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1518,6 +1515,10 @@ fun AutoTradeEngineDashboardCard(
     onManualSell: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var activeManualSide by remember { mutableStateOf<String?>(null) }
+    var lastClickTimeMs by remember { mutableLongStateOf(0L) }
+    val coroutineScope = rememberCoroutineScope()
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -1595,17 +1596,31 @@ fun AutoTradeEngineDashboardCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // BUY Button
+                // BUY Button (Single Click Protection Guard: strictly 1 click per press)
+                val isBuyLocked = activeManualSide != null
                 Button(
-                    onClick = onManualBuy,
+                    onClick = {
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastClickTimeMs < 2000L || activeManualSide != null) return@Button
+                        lastClickTimeMs = now
+                        activeManualSide = "BUY"
+                        coroutineScope.launch {
+                            delay(1800L)
+                            if (activeManualSide == "BUY") activeManualSide = null
+                        }
+                        onManualBuy()
+                    },
+                    enabled = !isBuyLocked,
                     modifier = Modifier
                         .weight(1f)
                         .height(50.dp)
                         .testTag("click_buy_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF16A34A),
-                        contentColor = Color.White
+                        containerColor = if (activeManualSide == "BUY") Color(0xFF15803D) else Color(0xFF16A34A),
+                        disabledContainerColor = Color(0xFF15803D).copy(alpha = 0.75f),
+                        contentColor = Color.White,
+                        disabledContentColor = Color.White
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
                 ) {
@@ -1614,14 +1629,14 @@ fun AutoTradeEngineDashboardCard(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "↑",
+                            text = if (activeManualSide == "BUY") "✔" else "↑",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.White
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "CLICK BUY",
+                            text = if (activeManualSide == "BUY") "SENT ✔" else "CLICK BUY",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.White
@@ -1636,17 +1651,31 @@ fun AutoTradeEngineDashboardCard(
                     }
                 }
 
-                // SELL Button
+                // SELL Button (Single Click Protection Guard: strictly 1 click per press)
+                val isSellLocked = activeManualSide != null
                 Button(
-                    onClick = onManualSell,
+                    onClick = {
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastClickTimeMs < 2000L || activeManualSide != null) return@Button
+                        lastClickTimeMs = now
+                        activeManualSide = "SELL"
+                        coroutineScope.launch {
+                            delay(1800L)
+                            if (activeManualSide == "SELL") activeManualSide = null
+                        }
+                        onManualSell()
+                    },
+                    enabled = !isSellLocked,
                     modifier = Modifier
                         .weight(1f)
                         .height(50.dp)
                         .testTag("click_sell_button"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFDC2626),
-                        contentColor = Color.White
+                        containerColor = if (activeManualSide == "SELL") Color(0xFFB91C1C) else Color(0xFFDC2626),
+                        disabledContainerColor = Color(0xFFB91C1C).copy(alpha = 0.75f),
+                        contentColor = Color.White,
+                        disabledContentColor = Color.White
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
                 ) {
@@ -1655,14 +1684,14 @@ fun AutoTradeEngineDashboardCard(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "↓",
+                            text = if (activeManualSide == "SELL") "✔" else "↓",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.White
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "CLICK SELL",
+                            text = if (activeManualSide == "SELL") "SENT ✔" else "CLICK SELL",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.White
@@ -1963,21 +1992,16 @@ private fun IndividualTradeHistoryCard(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // One-tap copy button for complete card summary
+                // One-tap copy button for specific trade summary per user requirement
                 IconButton(
                     onClick = {
-                        val fullSummary = """
-                            Trade #${totalCount - index} [${if (isUp) "UP / BUY ↗" else "DOWN / SELL ↘"}]
-                            Type: ${if (record.isAuto) "AUTO" else "MANUAL"}
-                            Date & Time: $dateStr
+                        val cardSummary = """
+                            Trade #${totalCount - index}
                             Previous: 5M: $prev5mStr | 60M: $prev60mStr
                             Current (Entry): 5M: $cur5mStr | 60M: $cur60mStr
-                            Location / Rule: $locationOrRule
-                            Channel: ${record.channel} (${record.latencyMs}ms)
-                            Status: ${record.status}
                         """.trimIndent()
-                        clipboardManager.setText(AnnotatedString(fullSummary))
-                        Toast.makeText(context, "Trade #$index info copied to clipboard", Toast.LENGTH_SHORT).show()
+                        clipboardManager.setText(AnnotatedString(cardSummary))
+                        Toast.makeText(context, "Trade #${totalCount - index} info copied", Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.size(24.dp)
                 ) {

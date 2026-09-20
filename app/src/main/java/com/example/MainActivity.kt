@@ -295,7 +295,13 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                             Icon(
                                 imageVector = Icons.Default.FlipCameraAndroid,
                                 contentDescription = "Rotate Camera",
-                                tint = if (uiState.selectedTestImageId != null) TextMuted.copy(alpha = 0.3f) else TextPrimary,
+                                tint = if (uiState.selectedTestImageId != null) {
+                                    TextMuted.copy(alpha = 0.3f)
+                                } else if (uiState.selectedCameraLens == 1) {
+                                    AccentCyan
+                                } else {
+                                    TextPrimary
+                                },
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -414,7 +420,12 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                             )
                         }
                     } else {
-                        // Portrait: Camera ~18% height (halved for sleek compact scanner), Dashboard ~82% height for optimal visibility
+                        // Portrait: Default Back Camera is compact scanner (~18% / weight 0.36f), Dashboard ~82% (1.64f).
+                        // When user switches to Front Camera, camera preview doubles in size to 0.72f (36%) per user instruction.
+                        val isFrontCam = uiState.selectedCameraLens == 1
+                        val cameraWeight = if (isFrontCam) 0.72f else 0.36f
+                        val dashboardWeight = 2.0f - cameraWeight
+
                         Column(modifier = Modifier.fillMaxSize()) {
                             CameraPreviewSection(
                                 uiState = uiState,
@@ -427,7 +438,7 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                                 onCaptureNow = { viewModel.triggerManualAnalysis() },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .weight(0.36f)
+                                    .weight(cameraWeight)
                             )
                             TradingDashboardSection(
                                 uiState = uiState,
@@ -441,7 +452,7 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                                 onQuantSignalChanged = { sig, isActive, analysis -> viewModel.onQuantSignalChanged(sig, isActive, analysis) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .weight(1.64f)
+                                    .weight(dashboardWeight)
                             )
                         }
                     }

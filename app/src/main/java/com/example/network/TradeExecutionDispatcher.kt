@@ -100,8 +100,9 @@ object TradeExecutionDispatcher {
     // Optical micro-jitter debounce between different trades in same direction (3000ms prevents broker double-clicks while allowing rapid verified trades)
     private const val RAPID_SAME_DIRECTION_GUARD_MS = 3000L
 
-    // Single-Click Protection Guard for manual button clicks (1500ms prevents broker double-clicks)
-    private const val MANUAL_CLICK_DEBOUNCE_MS = 1500L
+    // Single-Click Protection Guard for manual button clicks (2000ms prevents broker double-clicks)
+    private const val MANUAL_CLICK_DEBOUNCE_MS = 2000L
+    private val manualLock = Any()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -305,12 +306,14 @@ object TradeExecutionDispatcher {
         val direction = if (normalized == "CLICK_BUY") TradeDirection.UP else TradeDirection.DOWN
 
         val now = System.currentTimeMillis()
-        if (normalized == lastManualCommand && (now - lastManualDispatchedTimeMs < MANUAL_CLICK_DEBOUNCE_MS)) {
-            Log.d(TAG, "Manual trade click debounced: duplicate $normalized click within ${MANUAL_CLICK_DEBOUNCE_MS}ms")
-            return
+        synchronized(manualLock) {
+            if (now - lastManualDispatchedTimeMs < MANUAL_CLICK_DEBOUNCE_MS) {
+                Log.d(TAG, "Manual trade click debounced: click within ${MANUAL_CLICK_DEBOUNCE_MS}ms guard ($normalized rejected)")
+                return
+            }
+            lastManualDispatchedTimeMs = now
+            lastManualCommand = normalized
         }
-        lastManualDispatchedTimeMs = now
-        lastManualCommand = normalized
 
         val isWs = WebSocketTradeRelay.isConnected()
         val initialChannel = if (isWs) "WebSocket" else "HTTP Webhook"

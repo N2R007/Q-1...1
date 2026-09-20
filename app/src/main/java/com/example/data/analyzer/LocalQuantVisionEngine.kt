@@ -329,6 +329,11 @@ object LocalQuantVisionEngine {
             return CandidatePolarityResult(parsedValue, isAmbiguous = true, isApproximate = true, prefix = prefix)
         }
 
+        // 0% or 0.00% is mathematically neutral, valid without red/green polarity requirement!
+        if (abs(parsedValue) < 0.0001) {
+            return CandidatePolarityResult(0.0, isAmbiguous = false, isApproximate = false, prefix = "")
+        }
+
         // Without explicit sign (including zero): MUST rely on confirmed color polarity
         return when (polarity) {
             -1 -> CandidatePolarityResult(-abs(parsedValue), isAmbiguous = false, isApproximate = false, prefix = "")
@@ -338,6 +343,24 @@ object LocalQuantVisionEngine {
                 CandidatePolarityResult(parsedValue, isAmbiguous = true, isApproximate = false, prefix = "")
             }
         }
+    }
+
+    /**
+     * Strict whitelist character filter for detected percentage numbers.
+     * Per user mandate: ONLY accepts digits [0-9], signs (+, -, —, –, −), decimal dot (.), percent sign (%),
+     * and optional approximation prefix (~, ≈).
+     * STRICTLY rejects any Latin alphabet characters (a-z, A-Z), currency symbols, colons, or extraneous words.
+     */
+    fun isStrictPercentageToken(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        // Strictly reject any Latin alphabet letters (a-z, A-Z) to block words like Candle, Buy, Sell, Payout, etc.
+        if (Regex("""[a-zA-Z]""").containsMatchIn(trimmed)) return false
+        // Strictly reject forbidden symbols (currency, colons, slashes, brackets, etc.)
+        if (Regex("""[$€£¥₹৳:;/?!@#$^&*()_=\[\]{}|<>]""").containsMatchIn(trimmed)) return false
+        // Whitelist pattern: optional ~ or ≈, optional sign (+, -, —, –, −), digits, optional .digits, optional %
+        val allowedPattern = Regex("""^[~≈]?\s*[+\-—–−]?\s*[০-৯0-9]+(?:\.[০-৯0-9]+)?\s*%?$""")
+        return allowedPattern.matches(trimmed)
     }
 
     private data class OcrExtractedRates(
@@ -419,8 +442,8 @@ object LocalQuantVisionEngine {
         val forbiddenBoxes = forbiddenHeaders.mapNotNull { it.boundingBox }
 
         // Find candidate header lines for 5m and 60m (with boundary-aware regex to prevent matching 15m, 25m, etc.)
-        val regexHeader5m = Regex("""(?<!\d)(?:5\s*min|5\s*m|5\s*chg|5\s*change|5m\s*chg|5m\s*change|5-min|5-m|sm\s*in|sm\s*chg|৫\s*মিনিট|৫মি)(?!\w)""", RegexOption.IGNORE_CASE)
-        val regexHeader60m = Regex("""(?<!\d)(?:60\s*min|60\s*m|60\s*chg|60\s*change|60m\s*chg|60m\s*change|60-min|60-m|1\s*h|1\s*hr|1\s*hour|1h\s*chg|1h\s*change|৬০\s*মিনিট|৬০মি|১\s*ঘণ্টা|১\s*ঘন্টা)(?!\w)""", RegexOption.IGNORE_CASE)
+        val regexHeader5m = Regex("""(?<!\d)(?:5\s*min\s*change|5min\s*change|5\s*m\s*change|5m\s*change|5\s*min|5min|5\s*m|5m|5-min|5-m|sm\s*in|sm\s*chg|৫\s*মিনিট\s*পরিবর্তন|৫\s*মিনিট|৫মি)(?!\w)""", RegexOption.IGNORE_CASE)
+        val regexHeader60m = Regex("""(?<!\d)(?:60\s*min\s*change|60min\s*change|60\s*m\s*change|60m\s*change|60\s*min|60min|60\s*m|60m|60-min|60-m|1\s*h\s*change|1h\s*change|1\s*hour\s*change|1\s*h|1\s*hr|1\s*hour|1h|৬০\s*মিনিট\s*পরিবর্তন|৬০\s*মিনিট|৬০মি|১\s*ঘণ্টা\s*পরিবর্তন|১\s*ঘণ্টা|১\s*ঘন্টা)(?!\w)""", RegexOption.IGNORE_CASE)
 
         val headers5m = allLines.filter { line ->
             val text = line.text.lowercase(Locale.US)
@@ -451,6 +474,7 @@ object LocalQuantVisionEngine {
         data class CandidateNumber(
             val line: Text.Line,
             val box: Rect,
+            val tokenText: String,
             val rawValue: Double,
             val resolvedValue: Double,
             val isAmbiguous: Boolean = false,
@@ -519,12 +543,15 @@ object LocalQuantVisionEngine {
                         if (!tokenHasSign && !elemHasPercent) {
                             continue
                         }
+                        if (!isStrictPercentageToken(tokenStr)) {
+                            continue
+                        }
                         val clean = tokenStr.replace(Regex("[~≈\\s]"), "")
                         val parsed = clean.toDoubleOrNull()
                         if (parsed != null && abs(parsed) <= TradingOutputParser.MAX_VALID_PERCENTAGE) {
                             val polarity = determineColorPolarity(bitmap, elemBox)
                             val res = resolveCandidatePolarity(tokenStr, polarity, parsed)
-                            results.add(CandidateNumber(line, elemBox, parsed, res.resolvedValue, res.isAmbiguous, res.isApproximate, res.prefix))
+                            results.add(CandidateNumber(line, elemBox, tokenStr, parsed, res.resolvedValue, res.isAmbiguous, res.isApproximate, res.prefix))
                         }
                     }
                 }
@@ -545,6 +572,7 @@ object LocalQuantVisionEngine {
                         val tokenHasSign = tokenStr.contains("+") || tokenStr.contains("-") ||
                                 tokenStr.contains("—") || tokenStr.contains("–") || tokenStr.contains("−")
                         if (!tokenHasSign && !lineHasPercent) continue
+                        if (!isStrictPercentageToken(tokenStr)) continue
 
                         val clean = tokenStr.replace(Regex("[~≈\\s]"), "")
                         val parsed = clean.toDoubleOrNull()
@@ -552,7 +580,7 @@ object LocalQuantVisionEngine {
                             val polarity = determineColorPolarity(bitmap, lineBox)
                             // Note: pass tokenStr (the matched token) to strictly isolate signs and prevent bleeding across multiple numbers
                             val res = resolveCandidatePolarity(tokenStr, polarity, parsed)
-                            results.add(CandidateNumber(line, lineBox, parsed, res.resolvedValue, res.isAmbiguous, res.isApproximate, res.prefix))
+                            results.add(CandidateNumber(line, lineBox, tokenStr, parsed, res.resolvedValue, res.isAmbiguous, res.isApproximate, res.prefix))
                         }
                     }
                 }
@@ -582,29 +610,29 @@ object LocalQuantVisionEngine {
             // Candidates strictly for Column 1 (5 min change): must be directly underneath 5m header
             val col1Candidates = candidateNumbers.filter { cand ->
                 val box = cand.box
-                val isBelow = box.top >= headerBox5m.top - 10 && box.top <= headerBox5m.bottom + 220
+                val isBelow = (box.top >= headerBox5m.top - 10 || box.top >= headerBox5m.bottom - 20) && box.top <= headerBox5m.bottom + 220
                 val dist5m = abs(box.centerX() - center5m)
                 val dist60m = abs(box.centerX() - center60m)
-                isBelow && dist5m < dist60m && dist5m < colSpacing * 0.70
+                isBelow && dist5m < dist60m && dist5m < colSpacing * 0.70 && isStrictPercentageToken(cand.tokenText)
             }.sortedBy { it.box.top }
 
             // Candidates strictly for Column 2 (60 min change): must be directly underneath 60m header
             val col2Candidates = candidateNumbers.filter { cand ->
                 val box = cand.box
-                val isBelow = box.top >= headerBox60m.top - 10 && box.top <= headerBox60m.bottom + 220
+                val isBelow = (box.top >= headerBox60m.top - 10 || box.top >= headerBox60m.bottom - 20) && box.top <= headerBox60m.bottom + 220
                 val dist60m = abs(box.centerX() - center60m)
                 val dist5m = abs(box.centerX() - center5m)
                 val dist1d = abs(box.centerX() - center1d)
-                isBelow && dist60m < dist5m && dist60m < dist1d && dist60m < colSpacing * 0.70
+                isBelow && dist60m < dist5m && dist60m < dist1d && dist60m < colSpacing * 0.70 && isStrictPercentageToken(cand.tokenText)
             }.sortedBy { it.box.top }
 
             // Candidates strictly for Column 3 (1 day change): must be directly underneath 1d header
             val col3Candidates = candidateNumbers.filter { cand ->
                 val box = cand.box
-                val isBelow = if (headerBox1d != null) (box.top >= headerBox1d.top - 10 && box.top <= headerBox1d.bottom + 220) else (box.top >= headerBox60m.top - 10 && box.top <= headerBox60m.bottom + 220)
+                val isBelow = if (headerBox1d != null) ((box.top >= headerBox1d.top - 10 || box.top >= headerBox1d.bottom - 20) && box.top <= headerBox1d.bottom + 220) else ((box.top >= headerBox60m.top - 10 || box.top >= headerBox60m.bottom - 20) && box.top <= headerBox60m.bottom + 220)
                 val dist1d = abs(box.centerX() - center1d)
                 val dist60m = abs(box.centerX() - center60m)
-                isBelow && dist1d < dist60m && dist1d < colSpacing * 0.90
+                isBelow && dist1d < dist60m && dist1d < colSpacing * 0.90 && isStrictPercentageToken(cand.tokenText)
             }.sortedBy { it.box.top }
 
             val chosen5m = col1Candidates.firstOrNull()
@@ -686,48 +714,54 @@ object LocalQuantVisionEngine {
 
         if (match5m != null && val5m == null) {
             val tokenStr = match5m.groupValues[1]
-            val rawStr = tokenStr.replace(Regex("[~≈\\s]"), "")
-            val parsed = rawStr.toDoubleOrNull()
-            if (parsed != null && TradingOutputParser.isValidMetricValue(parsed)) {
-                val line5m = validLines.firstOrNull { regex5m.containsMatchIn(TradingOutputParser.normalizeBengaliAndDashes(it.text)) }
-                val polarity5m = line5m?.boundingBox?.let { determineColorPolarity(bitmap, it) } ?: 0
-                val res = resolveCandidatePolarity(tokenStr, polarity5m, parsed)
-                val5m = res.resolvedValue
-                if (res.isAmbiguous) isAmbiguousCombined = true
-                if (res.isApproximate) {
-                    isApprox = true
-                    prefix5m = res.prefix
+            if (isStrictPercentageToken(tokenStr)) {
+                val rawStr = tokenStr.replace(Regex("[~≈\\s]"), "")
+                val parsed = rawStr.toDoubleOrNull()
+                if (parsed != null && TradingOutputParser.isValidMetricValue(parsed)) {
+                    val line5m = validLines.firstOrNull { regex5m.containsMatchIn(TradingOutputParser.normalizeBengaliAndDashes(it.text)) }
+                    val polarity5m = line5m?.boundingBox?.let { determineColorPolarity(bitmap, it) } ?: 0
+                    val res = resolveCandidatePolarity(tokenStr, polarity5m, parsed)
+                    val5m = res.resolvedValue
+                    if (res.isAmbiguous) isAmbiguousCombined = true
+                    if (res.isApproximate) {
+                        isApprox = true
+                        prefix5m = res.prefix
+                    }
                 }
             }
         }
 
         if (match60m != null && val60m == null) {
             val tokenStr = match60m.groupValues[1]
-            val rawStr = tokenStr.replace(Regex("[~≈\\s]"), "")
-            val parsed = rawStr.toDoubleOrNull()
-            if (parsed != null && TradingOutputParser.isValidMetricValue(parsed)) {
-                val line60m = validLines.firstOrNull { regex60m.containsMatchIn(TradingOutputParser.normalizeBengaliAndDashes(it.text)) }
-                val polarity60m = line60m?.boundingBox?.let { determineColorPolarity(bitmap, it) } ?: 0
-                val res = resolveCandidatePolarity(tokenStr, polarity60m, parsed)
-                val60m = res.resolvedValue
-                if (res.isAmbiguous) isAmbiguousCombined = true
-                if (res.isApproximate) {
-                    isApprox = true
-                    prefix60m = res.prefix
+            if (isStrictPercentageToken(tokenStr)) {
+                val rawStr = tokenStr.replace(Regex("[~≈\\s]"), "")
+                val parsed = rawStr.toDoubleOrNull()
+                if (parsed != null && TradingOutputParser.isValidMetricValue(parsed)) {
+                    val line60m = validLines.firstOrNull { regex60m.containsMatchIn(TradingOutputParser.normalizeBengaliAndDashes(it.text)) }
+                    val polarity60m = line60m?.boundingBox?.let { determineColorPolarity(bitmap, it) } ?: 0
+                    val res = resolveCandidatePolarity(tokenStr, polarity60m, parsed)
+                    val60m = res.resolvedValue
+                    if (res.isAmbiguous) isAmbiguousCombined = true
+                    if (res.isApproximate) {
+                        isApprox = true
+                        prefix60m = res.prefix
+                    }
                 }
             }
         }
 
         if (match1d != null && val1d == null) {
             val tokenStr = match1d.groupValues[1]
-            val rawStr = tokenStr.replace(Regex("[~≈\\s]"), "")
-            val parsed = rawStr.toDoubleOrNull()
-            if (parsed != null && TradingOutputParser.isValidMetricValue(parsed)) {
-                val line1d = validLines.firstOrNull { regex1d.containsMatchIn(TradingOutputParser.normalizeBengaliAndDashes(it.text)) }
-                val polarity1d = line1d?.boundingBox?.let { determineColorPolarity(bitmap, it) } ?: 0
-                val res = resolveCandidatePolarity(tokenStr, polarity1d, parsed)
-                // Ambiguous, approximate, or out-of-range 1D must be dropped, not guessed
-                val1d = if (res.isAmbiguous || res.isApproximate || !TradingOutputParser.isValidMetricValue(res.resolvedValue)) null else res.resolvedValue
+            if (isStrictPercentageToken(tokenStr)) {
+                val rawStr = tokenStr.replace(Regex("[~≈\\s]"), "")
+                val parsed = rawStr.toDoubleOrNull()
+                if (parsed != null && TradingOutputParser.isValidMetricValue(parsed)) {
+                    val line1d = validLines.firstOrNull { regex1d.containsMatchIn(TradingOutputParser.normalizeBengaliAndDashes(it.text)) }
+                    val polarity1d = line1d?.boundingBox?.let { determineColorPolarity(bitmap, it) } ?: 0
+                    val res = resolveCandidatePolarity(tokenStr, polarity1d, parsed)
+                    // Ambiguous, approximate, or out-of-range 1D must be dropped, not guessed
+                    val1d = if (res.isAmbiguous || res.isApproximate || !TradingOutputParser.isValidMetricValue(res.resolvedValue)) null else res.resolvedValue
+                }
             }
         }
 
