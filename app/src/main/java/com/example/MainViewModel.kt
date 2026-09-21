@@ -148,13 +148,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _quantActiveSignal = kotlinx.coroutines.flow.MutableStateFlow<com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match?>(null)
     val quantActiveSignal: StateFlow<com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match?> = _quantActiveSignal.asStateFlow()
 
+    // Safety guard timestamp: blocks immediate auto-trades right after user opens/edits/saves/dismisses rule dialogs
+    @Volatile
+    private var ruleEditSafetyCooldownUntilMs: Long = 0L
+
+    fun notifyRuleEditorDismissed(gracePeriodMs: Long = 500L) {
+        val until = System.currentTimeMillis() + gracePeriodMs
+        ruleEditSafetyCooldownUntilMs = maxOf(ruleEditSafetyCooldownUntilMs, until)
+        // Reset last trade lock / fingerprint so edited rule can immediately fire when verified
+        lastAutoTradeMatrixId = null
+        lastDispatchedFingerprint = null
+    }
+
     private val _isQuantSignalActive = kotlinx.coroutines.flow.MutableStateFlow(false)
     val isQuantSignalActive: StateFlow<Boolean> = _isQuantSignalActive.asStateFlow()
 
     fun onQuantSignalChanged(
         signal: com.example.data.matrix.Authorized106MatrixEngine.Matrix106Match?,
         isActive: Boolean,
-        analysis: TradingAnalysis? = null
+        analysis: TradingAnalysis? = null,
+        triggerAutoTrade: Boolean = true
     ) {
         val effectiveDir = signal?.let { com.example.data.matrix.UserRuleRegistry.getRuleOverride(it.id) ?: it.direction }
         val effectiveSignal = if (signal != null && effectiveDir != null && effectiveDir != signal.direction) {
@@ -165,21 +178,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _quantActiveSignal.value = effectiveSignal
         _isQuantSignalActive.value = isActive
 
-        if (isActive && effectiveSignal != null && (effectiveSignal.direction == TradeDirection.UP || effectiveSignal.direction == TradeDirection.DOWN)) {
-            val targetAnalysis = analysis ?: _uiState.value.currentAnalysis
-            val v5 = targetAnalysis?.change5mValue
-            val v60 = targetAnalysis?.change60mValue
-            val v1d = targetAnalysis?.change1dValue
-            val invest = _uiState.value.investmentAmount
+        val now = System.currentTimeMillis()
+        if (triggerAutoTrade && now >= ruleEditSafetyCooldownUntilMs) {
+            if (isActive && effectiveSignal != null && (effectiveSignal.direction == TradeDirection.UP || effectiveSignal.direction == TradeDirection.DOWN)) {
+                val targetAnalysis = analysis ?: _uiState.value.currentAnalysis
+                val v5 = targetAnalysis?.change5mValue
+                val v60 = targetAnalysis?.change60mValue
+                val v1d = targetAnalysis?.change1dValue
+                val invest = _uiState.value.investmentAmount
 
-            if (targetAnalysis != null && v5 != null && v60 != null) {
-                evaluateAndDispatchAutoTrade(
-                    analysis = targetAnalysis,
-                    v5 = v5,
-                    v60 = v60,
-                    v1d = v1d,
-                    investmentAmount = invest
-                )
+                if (targetAnalysis != null && v5 != null && v60 != null) {
+                    evaluateAndDispatchAutoTrade(
+                        analysis = targetAnalysis,
+                        v5 = v5,
+                        v60 = v60,
+                        v1d = v1d,
+                        investmentAmount = invest
+                    )
+                }
             }
         }
     }
@@ -1346,6 +1362,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         investmentAmount: Double
     ) {
         // 0. Master Auto-Trade Switch Guard:
+        // 100% MANDATORY SAFETY GUARD:
+        // Do NOT execute auto-trades immediately when user opens/edits/saves/dismisses Rule Editor.
+        // Wait until user has returned to live scanning and a genuine new camera frame arrives.
+        val now = System.currentTimeMillis()
+        if (now < ruleEditSafetyCooldownUntilMs) {
+            return
+        }
+
         // Must be explicitly enabled by user via dashboard switch (default is OFF)
         if (!_uiState.value.isAutoTradeEnabled) {
             return
@@ -1366,29 +1390,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val activeQuant = _quantActiveSignal.value ?: return
-        val activeEffDir = com.example.data.matrix.UserRuleRegistry.getRuleOverride(activeQuant.id) ?: activeQuant.direction
-        if (activeEffDir != TradeDirection.UP && activeEffDir != TradeDirection.DOWN) {
-            return
-        }
-
-        // Evaluate mathSignal strictly from Authorized106MatrixEngine. No secondary engine or heuristic fallbacks!
-        val mathSignal = com.example.data.matrix.Authorized106MatrixEngine.evaluate(
-            val5m = v5,
-            val60m = v60,
-            val1d = v1d,
-            history = rollingMetricHistory
-        )
-
-        // Must match active signal displayed in QUANT right button
-        if (mathSignal == null || mathSignal.id != activeQuant.id) {
-            return
-        }
-
-        val candidateRuleId = mathSignal.id
+        val candidateRuleId = activeQuant.id
         val cleanRuleId = candidateRuleId.replace("[", "").replace("]", "").uppercase().trim()
 
-        // 100% MANDATORY STRICT USER MANDATE (মেট্রিক সেকশনে ভেরিফাইকৃত ও টিক চিহ্নযুক্ত রুলস):
-        // Only verified and ticked (✓) metric numbers in UserRuleRegistry will take auto entry as soon as detected on screen!
+        // 100% MANDATORY STRICT USER MANDATE:
+        // ম্যাট্রিক্স নাম্বারের পাশে যদি ভেরিফাইড টিক চিহ্ন (✓) থাকে সাথে সাথে অটো ট্রেড ফায়ার হবে!
         val isRuleUserVerified = com.example.data.matrix.UserRuleRegistry.isRuleVerified(cleanRuleId)
         if (!isRuleUserVerified) {
             if (lastAutoTradeMatrixId != null && lastAutoTradeMatrixId != cleanRuleId) {
@@ -1405,16 +1411,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Resolve effective trade direction, honoring any user direction override in UserRuleRegistry
         val overrideDir = com.example.data.matrix.UserRuleRegistry.getRuleOverride(cleanRuleId)
-        val effectiveDir = overrideDir ?: mathSignal.direction
+        val effectiveDir = overrideDir ?: activeQuant.direction
 
         if (effectiveDir != TradeDirection.UP && effectiveDir != TradeDirection.DOWN) {
             return
         }
 
         val tradeSide = if (effectiveDir == TradeDirection.UP) "BUY" else "SELL"
-        val ruleTitle = mathSignal.title
+        val ruleTitle = activeQuant.title
         val fp = "SIG:${cleanRuleId}:${tradeSide}"
-        val now = System.currentTimeMillis()
 
         // STRICT SINGLE-ENTRY GUARANTEE (USER MANDATE - 1 TRADE PER SIGNAL):
         // Prevents duplicate firing on continuous 20ms camera OCR frames.

@@ -29,23 +29,49 @@ object Authorized106MatrixEngine {
         val1d: Double? = null,
         history: List<MetricSnapshot> = emptyList()
     ): Matrix106Match? {
+        if (val5m == null || val60m == null) return null
+
+        // 1. First priority: Strict 206 Directional Matrix Rules & User Custom Rules
         val res = Directional206MatrixEngine.evaluate(
+            val5m = val5m,
+            val60m = val60m,
+            val1d = val1d,
+            history = history
+        )
+
+        if (res != null) {
+            val effDir = UserRuleRegistry.getRuleOverride(res.id) ?: res.direction
+            return Matrix106Match(
+                id = res.id,
+                direction = effDir,
+                outputCode = res.outputCode,
+                title = res.title,
+                conditionDescription = if (effDir != res.direction) {
+                    "User Override ${res.id}: [$effDir] (Default: ${res.direction}) ${res.outputCode}"
+                } else res.conditionDescription,
+                priority = res.priority
+            )
+        }
+
+        // 2. Second priority: Dynamic Delta Momentum Engine (স্বয়ংক্রিয় গাণিতিক ডেল্টা মোমেন্টাম ভেক্টর)
+        // Dynamically calculates direction using live 5m/60m percentages, rate of change (Delta), and trend vectors.
+        val dyn = DynamicDeltaMomentumEngine.calculate(
             val5m = val5m,
             val60m = val60m,
             val1d = val1d,
             history = history
         ) ?: return null
 
-        val effDir = UserRuleRegistry.getRuleOverride(res.id) ?: res.direction
+        val effDir = UserRuleRegistry.getRuleOverride(dyn.id) ?: dyn.direction
         return Matrix106Match(
-            id = res.id,
+            id = dyn.id,
             direction = effDir,
-            outputCode = res.outputCode,
-            title = res.title,
-            conditionDescription = if (effDir != res.direction) {
-                "User Override ${res.id}: [$effDir] (Default: ${res.direction}) ${res.outputCode}"
-            } else res.conditionDescription,
-            priority = res.priority
+            outputCode = dyn.outputCode,
+            title = dyn.title,
+            conditionDescription = if (effDir != dyn.direction) {
+                "User Override ${dyn.id}: [$effDir] (Default: ${dyn.direction})"
+            } else dyn.conditionDescription,
+            priority = 50
         )
     }
 }

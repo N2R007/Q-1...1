@@ -213,6 +213,10 @@ Located in `AutoTradeBridge.kt` and `WebSocketTradeRelay.kt`:
   1. **Mode 1 (USB Cable / ADB Reverse)**: Automatically probes `ws://127.0.0.1:8765` first (with ultra-low latency). Requires zero router setup.
   2. **Mode 2 (Wi-Fi Local Network)**: Automatically resolves the connected Wi-Fi gateway (e.g. `192.168.0.x` / `192.168.1.x`) and defaults to port 8765.
   3. **Mode 3 (Mobile Hotspot / SIM Cellular)**: Automatically detects hotspot subnet gateway (`192.168.43.1` or interface `rndis0`/`ap0`) to communicate directly with the connected laptop.
+- **Instant Auto-Trade Dispatch on Verified (✓) Match (User Mandate)**:
+  - Whenever a detected matrix rule (e.g. `D080`, `M001`-`M165`, or custom) displays the verified checkmark (`✓`) in the metric chip, auto-trade dispatches immediately to the WebSocket broker relay with 0ms latency.
+  - Eliminated redundant background re-evaluation mismatch blocks so that the active signal on screen directly triggers the dispatch.
+  - Toggling verification directly from the dashboard immediately dispatches the active signal without waiting for subsequent changes.
 - **Immediate Polarity-Based Trade Dispatch**:
   - Direct hook into OCR and Color momentum: `sendTradeSignal(polarity: Int)`
   - `polarity = 1` -> `BUY` / `CLICK_BUY`
@@ -462,8 +466,21 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
     5. `MainViewModel`: In both `onQuantSignalChanged` and `evaluateAndDispatchAutoTrade`, strictly enforces the overridden direction so auto-trades fire with the user-selected direction.
     6. `TradingDashboard`: Reads `UserRuleRegistry.getRuleOverride` for the active signal so the QUANT right button, badge, and arrows visually display the converted direction (UP = Green, DOWN = Red).
   - **Dynamic Context Pre-Fill**: Opening `RuleManagerDialog` automatically pre-fills with the active live screen rule ID (e.g. `D061`), or calculates the active rule from the latched screen percentages, eliminating manual typing mistakes.
-  - **Instant UI Refresh**: When the user saves an override or closes `RuleManagerDialog`, the dashboard immediately re-evaluates the active signal using the latched 5m/60m percentages, instantly updating the on-screen signal and button state without requiring a manual app restart.
+  - **Instant UI Refresh with Zero Accidental Trade Fire**: When the user saves an override or closes `RuleManagerDialog`, the dashboard visually updates the active signal and button colors immediately, but **strictly suppresses** immediate auto-trade firing.
+  - **Rule Editor Exit Safety Guard (`ruleEditSafetyCooldownUntilMs`)**:
+    - Closing the Rule Editor (`onDismiss`) activates an authoritative 5-second Safety Guard period in `MainViewModel`.
+    - During this 5-second grace window, all automatic order dispatches are strictly blocked, preventing old latched screen percentages from falsely triggering a trade.
+    - Prevents artificial incrementation of `isNewChangeTrigger`, ensuring that trades only fire when a genuine *new* price momentum reading arrives from the camera after the user has returned to live scanning.
   - **Robust Backup Import/Export**: Supports complete backup/restore of custom rules, overrides, and verification sets with JSON validation, direct array support, and detailed import feedback.
+
+### 12.1 `DynamicDeltaMomentumEngine.kt` (স্বয়ংক্রিয় গাণিতিক ডেল্টা মোমেন্টাম ভেক্টর ইঞ্জিন)
+- **Mathematical Fallback & Out-of-Matrix Dynamic Decision System**:
+  - When live 5m and 60m percentages do not fall into any of the 206/312 pre-defined fixed matrix rules, this engine computes dynamic mathematical vectors rather than dropping into a dead `-Wait` state.
+  - **Delta Rate-of-Change ($\Delta 5m, \Delta 60m$)**: Measures velocity between previous and current candle readings ($\Delta 5m = 5m_{curr} - 5m_{prev}$) to detect immediate aggressive surges or sharp reversals.
+  - **Multi-Timeframe Vector Weighting**: Synthesizes a composite momentum vector with 65% weight on short-term 5m expansion and 35% on 60m macro trend bias ($Vector = 0.65 \times 5m + 0.35 \times 60m$).
+  - **High-Velocity Delta Trajectory**: Detects breakout momentum ($\Delta 5m \ge +0.01\%$) and breakdown momentum ($\Delta 5m \le -0.01\%$), generating `DYN-UP` or `DYN-DN`.
+  - **Dead-Zone Noise Elimination**: Excludes ambiguous noise when $|5m| < 0.005$ and $|60m| < 0.005$.
+  - **100% Verified Auto-Trade Readiness**: `DYN-UP` and `DYN-DN` are recognized by `UserRuleRegistry` as verified high-priority signals, allowing instant automatic execution without manual intervention.
 
 ### 13. `TradingDashboard.kt`
 - The complete Jetpack Compose user interface.

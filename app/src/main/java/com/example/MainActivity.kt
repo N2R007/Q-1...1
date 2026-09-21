@@ -414,6 +414,7 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                                 onToggleAutoTrade = { viewModel.toggleAutoTrade() },
                                 onResetTradeLock = { viewModel.resetAutoTradeLock() },
                                 onQuantSignalChanged = { sig, isActive, analysis -> viewModel.onQuantSignalChanged(sig, isActive, analysis) },
+                                onRuleEditorDismissed = { viewModel.notifyRuleEditorDismissed(5000L) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
@@ -450,6 +451,7 @@ fun QuantVisionApp(viewModel: MainViewModel) {
                                 onToggleAutoTrade = { viewModel.toggleAutoTrade() },
                                 onResetTradeLock = { viewModel.resetAutoTradeLock() },
                                 onQuantSignalChanged = { sig, isActive, analysis -> viewModel.onQuantSignalChanged(sig, isActive, analysis) },
+                                onRuleEditorDismissed = { viewModel.notifyRuleEditorDismissed(5000L) },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(dashboardWeight)

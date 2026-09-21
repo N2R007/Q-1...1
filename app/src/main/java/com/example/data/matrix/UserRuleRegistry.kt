@@ -131,6 +131,7 @@ object UserRuleRegistry {
     fun getRuleCategoryLabel(ruleId: String): String {
         val clean = canonicalizeRuleId(ruleId)
         return when {
+            clean.startsWith("DYN") -> "DYNAMIC MOMENTUM (স্বয়ংক্রিয় ডেল্টা ভেক্টর - HIGH)"
             clean.startsWith("C") -> "CUSTOM STRATEGY (কাস্টম রুল - HIGH)"
             clean in setOf("U035", "U036", "D035", "D036") -> "MEGA SUPER CLIMAX (HIGH)"
             clean in setOf("U027", "U028", "U029", "U030", "U031", "U032", "U033", "U034", "D027", "D028", "D029", "D030", "D031", "D032", "D033", "D034") -> "ULTRA CLIMAX (HIGH)"
@@ -154,7 +155,7 @@ object UserRuleRegistry {
         val clean = canonicalizeRuleId(ruleId)
         if (clean.isBlank()) return ""
         return when {
-            clean in DEFAULT_VERIFIED_HIGH_RULES || clean.startsWith("C") -> "HIGH"
+            clean.startsWith("DYN") || clean in DEFAULT_VERIFIED_HIGH_RULES || clean.startsWith("C") -> "HIGH"
             clean in MEDIUM_RULES -> "MEDIUM"
             else -> "LOW"
         }
@@ -455,8 +456,8 @@ object UserRuleRegistry {
         val cleanId = canonicalizeRuleId(ruleId)
         if (unverifiedRuleIds.contains(cleanId)) return false
         if (verifiedRuleIds.contains(cleanId)) return true
-        // Default: Any valid directional/matrix rule (U, D, M) or custom rule (C) is eligible for 100% Auto-Trade
-        return cleanId.startsWith("U") || cleanId.startsWith("D") || cleanId.startsWith("M") || cleanId.startsWith("C")
+        // Default: Any valid directional/matrix rule (U, D, M), custom rule (C), or dynamic momentum (DYN) is eligible for 100% Auto-Trade
+        return cleanId.startsWith("U") || cleanId.startsWith("D") || cleanId.startsWith("M") || cleanId.startsWith("C") || cleanId.startsWith("DYN")
     }
 
     /**

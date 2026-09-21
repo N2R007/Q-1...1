@@ -176,6 +176,7 @@ fun TradingDashboardSection(
     onToggleAutoTrade: () -> Unit = {},
     onResetTradeLock: () -> Unit = {},
     onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> },
+    onRuleEditorDismissed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -257,7 +258,8 @@ fun TradingDashboardSection(
                     onSetTradeOutcome = onSetTradeOutcome,
                     onSetHistoryItemOutcome = onSetHistoryItemOutcome,
                     onResetSessionPnl = onResetSessionPnl,
-                    onQuantSignalChanged = onQuantSignalChanged
+                    onQuantSignalChanged = onQuantSignalChanged,
+                    onRuleEditorDismissed = onRuleEditorDismissed
                 )
                 1 -> WebSocketAutoTradeTab(
                     isAutoTradeEnabled = uiState.isAutoTradeEnabled,
@@ -279,7 +281,8 @@ fun MainAnalysisTab(
     onSetTradeOutcome: (TradeOutcome) -> Unit = {},
     onSetHistoryItemOutcome: (Long, TradeOutcome) -> Unit = { _, _ -> },
     onResetSessionPnl: () -> Unit = {},
-    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> }
+    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> },
+    onRuleEditorDismissed: () -> Unit = {}
 ) {
     val analysis = uiState.currentAnalysis
     val executedTrades by TradeExecutionDispatcher.executedTrades.collectAsState()
@@ -339,7 +342,8 @@ fun MainAnalysisTab(
             analysis = analysis,
             history = uiState.history,
             isAudioAlertEnabled = uiState.isAudioAlertEnabled,
-            onQuantSignalChanged = onQuantSignalChanged
+            onQuantSignalChanged = onQuantSignalChanged,
+            onRuleEditorDismissed = onRuleEditorDismissed
         )
 
         // 2. PINNED & FIXED: Auto-Trade Engine Card (মাস্টার টগল ও ম্যানুয়াল বাই/সেল বাটন)
@@ -816,22 +820,13 @@ fun QuantitativeMetricsGrid(
     analysis: TradingAnalysis?,
     history: List<TradingAnalysis> = emptyList(),
     isAudioAlertEnabled: Boolean = true,
-    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> }
+    onQuantSignalChanged: (Authorized106MatrixEngine.Matrix106Match?, Boolean, TradingAnalysis?) -> Unit = { _, _, _ -> },
+    onRuleEditorDismissed: () -> Unit = {}
 ) {
     // 106 Matrix evaluation logic
     val val5m = analysis?.change5mValue
     val val60m = analysis?.change60mValue
     val val1d = analysis?.change1dValue
-
-    val metricSnapshots = remember(history) {
-        history.mapNotNull { h ->
-            val m5 = h.change5mValue
-            val m60 = h.change60mValue
-            if (m5 != null && m60 != null) {
-                MetricSnapshot(val5m = m5, val60m = m60, val1d = h.change1dValue)
-            } else null
-        }
-    }
 
     var refreshVerifiedState by remember { mutableIntStateOf(0) }
 
@@ -849,11 +844,29 @@ fun QuantitativeMetricsGrid(
     var lastAlertedTimestamp by remember { mutableStateOf(0L) }
 
     // Latched state for 5m, 60m percentages: persists values rock-steady without jumping
+    var prev5mValue by remember { mutableStateOf<Double?>(null) }
+    var prev60mValue by remember { mutableStateOf<Double?>(null) }
     var latched5mStr by remember { mutableStateOf<String?>(null) }
     var latched5mValue by remember { mutableStateOf<Double?>(null) }
     var latched60mStr by remember { mutableStateOf<String?>(null) }
     var latched60mValue by remember { mutableStateOf<Double?>(null) }
     var latched1dValue by remember { mutableStateOf<Double?>(null) }
+
+    val metricSnapshots = remember(history, prev5mValue, prev60mValue) {
+        val list = history.mapNotNull { h ->
+            val m5 = h.change5mValue
+            val m60 = h.change60mValue
+            if (m5 != null && m60 != null) {
+                MetricSnapshot(val5m = m5, val60m = m60, val1d = h.change1dValue)
+            } else null
+        }.toMutableList()
+        val p5 = prev5mValue
+        val p60 = prev60mValue
+        if (p5 != null && p60 != null) {
+            list.add(0, MetricSnapshot(val5m = p5, val60m = p60, val1d = null))
+        }
+        list
+    }
 
     var isNewChangeTrigger by remember { mutableIntStateOf(0) }
 
@@ -876,6 +889,10 @@ fun QuantitativeMetricsGrid(
             val has60mChanged = latched60mValue != null && (current60mStr != latched60mStr || kotlin.math.abs(current60m - (latched60mValue ?: 0.0)) >= 0.0001)
 
             if (isFirstTime || has5mChanged || has60mChanged) {
+                if (!isFirstTime) {
+                    prev5mValue = latched5mValue
+                    prev60mValue = latched60mValue
+                }
                 latched5mValue = current5m
                 latched5mStr = current5mStr
                 latched60mValue = current60m
@@ -1089,6 +1106,9 @@ fun QuantitativeMetricsGrid(
                             if (!currentSignalId.isNullOrBlank()) {
                                 UserRuleRegistry.toggleVerifiedRule(currentSignalId)
                                 refreshVerifiedState++
+                                if (UserRuleRegistry.isRuleVerified(currentSignalId) && activeSignal != null && isSignalActive) {
+                                    onQuantSignalChanged(activeSignal, true, analysis)
+                                }
                             }
                         },
                         shape = RoundedCornerShape(4.dp),
@@ -1519,8 +1539,12 @@ fun QuantitativeMetricsGrid(
             live60m = latchedM60,
             onDismiss = {
                 showRuleManagerDialog = false
+                onRuleEditorDismissed()
                 refreshVerifiedState++
-                isNewChangeTrigger++
+                // CRITICAL SAFETY FIX:
+                // 1. DO NOT increment isNewChangeTrigger++ here (prevents falsely simulating a new live camera event)
+                // 2. DO NOT call onQuantSignalChanged with trade trigger
+                // 3. Only update local activeSignal so the QUANT button visually displays the new override direction/match
                 val m5 = latched5mValue ?: analysis?.change5mValue
                 val m60 = latched60mValue ?: analysis?.change60mValue
                 if (m5 != null && m60 != null) {
@@ -1532,8 +1556,6 @@ fun QuantitativeMetricsGrid(
                     )
                     if (updatedMatch != null) {
                         activeSignal = updatedMatch
-                        isSignalActive = true
-                        onQuantSignalChanged(updatedMatch, true, analysis)
                     }
                 }
             }
