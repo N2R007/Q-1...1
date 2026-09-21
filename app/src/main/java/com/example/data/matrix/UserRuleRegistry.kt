@@ -110,9 +110,28 @@ object UserRuleRegistry {
         "D071", "D072", "D075", "D076"
     )
 
+    /**
+     * Converts any user or system rule ID representation (e.g. "u1", "d61", "m42", "c1", "[D061]")
+     * into standard 3-digit canonical format ("U001", "D061", "M042", "C001").
+     */
+    fun canonicalizeRuleId(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        val clean = raw.replace("[", "").replace("]", "").trim().uppercase()
+        val match = Regex("^([UDMC])(\\d+)$").find(clean)
+        if (match != null) {
+            val prefix = match.groupValues[1]
+            val num = match.groupValues[2].toIntOrNull()
+            if (num != null) {
+                return "%s%03d".format(prefix, num)
+            }
+        }
+        return clean
+    }
+
     fun getRuleCategoryLabel(ruleId: String): String {
-        val clean = ruleId.uppercase().trim()
+        val clean = canonicalizeRuleId(ruleId)
         return when {
+            clean.startsWith("C") -> "CUSTOM STRATEGY (কাস্টম রুল - HIGH)"
             clean in setOf("U035", "U036", "D035", "D036") -> "MEGA SUPER CLIMAX (HIGH)"
             clean in setOf("U027", "U028", "U029", "U030", "U031", "U032", "U033", "U034", "D027", "D028", "D029", "D030", "D031", "D032", "D033", "D034") -> "ULTRA CLIMAX (HIGH)"
             clean in setOf("U019", "U020", "U021", "U022", "U023", "U024", "U025", "U026", "D019", "D020", "D021", "D022", "D023", "D024", "D025", "D026") -> "HIGH MOMENTUM (HIGH)"
@@ -132,7 +151,7 @@ object UserRuleRegistry {
      * Returns the simplified English tier ("HIGH", "MEDIUM", "LOW") for dashboard UI display.
      */
     fun getRuleTierSimple(ruleId: String): String {
-        val clean = ruleId.uppercase().replace("[", "").replace("]", "").trim()
+        val clean = canonicalizeRuleId(ruleId)
         if (clean.isBlank()) return ""
         return when {
             clean in DEFAULT_VERIFIED_HIGH_RULES || clean.startsWith("C") -> "HIGH"
@@ -299,20 +318,24 @@ object UserRuleRegistry {
     // --- OVERRIDE METHODS ---
 
     fun getRuleOverride(ruleId: String): TradeDirection? {
-        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
-        return directionOverrides[cleanId] ?: directionOverrides[ruleId]
+        val cleanId = canonicalizeRuleId(ruleId)
+        return directionOverrides[cleanId] ?: directionOverrides[ruleId.replace("[", "").replace("]", "").uppercase().trim()]
     }
 
     fun setRuleOverride(ruleId: String, direction: TradeDirection) {
-        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
-        directionOverrides[cleanId] = direction
-        saveOverridesToPrefs()
+        val cleanId = canonicalizeRuleId(ruleId)
+        if (cleanId.isNotBlank()) {
+            directionOverrides[cleanId] = direction
+            // User-edited rules are guaranteed verified for immediate auto-trade execution
+            setRuleVerified(cleanId, true)
+            saveOverridesToPrefs()
+        }
     }
 
     fun removeRuleOverride(ruleId: String) {
-        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
+        val cleanId = canonicalizeRuleId(ruleId)
         directionOverrides.remove(cleanId)
-        directionOverrides.remove(ruleId)
+        directionOverrides.remove(ruleId.replace("[", "").replace("]", "").uppercase().trim())
         saveOverridesToPrefs()
     }
 
@@ -344,27 +367,37 @@ object UserRuleRegistry {
     }
 
     fun addOrUpdateCustomRule(rule: CustomRule) {
+        val canonicalRule = rule.copy(
+            id = canonicalizeRuleId(rule.id).ifBlank { getNextCustomRuleId() },
+            min5m = minOf(rule.min5m, rule.max5m),
+            max5m = maxOf(rule.min5m, rule.max5m),
+            min60m = minOf(rule.min60m, rule.max60m),
+            max60m = maxOf(rule.min60m, rule.max60m)
+        )
         synchronized(lock) {
-            val existingIdx = customRules.indexOfFirst { it.id.equals(rule.id, ignoreCase = true) }
+            val existingIdx = customRules.indexOfFirst { it.id.equals(canonicalRule.id, ignoreCase = true) }
             if (existingIdx >= 0) {
-                customRules[existingIdx] = rule
+                customRules[existingIdx] = canonicalRule
             } else {
-                customRules.add(rule)
+                customRules.add(canonicalRule)
             }
         }
+        setRuleVerified(canonicalRule.id, true)
         saveCustomRulesToPrefs()
     }
 
     fun deleteCustomRule(ruleId: String) {
+        val cleanId = canonicalizeRuleId(ruleId)
         synchronized(lock) {
-            customRules.removeAll { it.id.equals(ruleId, ignoreCase = true) }
+            customRules.removeAll { it.id.equals(cleanId, ignoreCase = true) || it.id.equals(ruleId, ignoreCase = true) }
         }
         saveCustomRulesToPrefs()
     }
 
     fun toggleCustomRule(ruleId: String, isActive: Boolean) {
+        val cleanId = canonicalizeRuleId(ruleId)
         synchronized(lock) {
-            val idx = customRules.indexOfFirst { it.id.equals(ruleId, ignoreCase = true) }
+            val idx = customRules.indexOfFirst { it.id.equals(cleanId, ignoreCase = true) || it.id.equals(ruleId, ignoreCase = true) }
             if (idx >= 0) {
                 customRules[idx] = customRules[idx].copy(isActive = isActive)
             }
@@ -392,13 +425,18 @@ object UserRuleRegistry {
                 val low60 = minOf(rule.min60m, rule.max60m)
                 val high60 = maxOf(rule.min60m, rule.max60m)
 
-                if (val5m in low5..high5 && val60m in low60..high60) {
+                // Epsilon tolerance (0.0001) to prevent double precision boundary issues
+                val match5 = val5m >= (low5 - 0.0001) && val5m <= (high5 + 0.0001)
+                val match60 = val60m >= (low60 - 0.0001) && val60m <= (high60 + 0.0001)
+
+                if (match5 && match60) {
+                    val effDir = getRuleOverride(rule.id) ?: rule.direction
                     return Directional206MatrixEngine.DirectionalMatrixMatch(
                         id = rule.id,
-                        direction = rule.direction,
+                        direction = effDir,
                         outputCode = "CUSTOM_${rule.id}",
                         title = rule.title.ifBlank { "Custom Rule ${rule.id}" },
-                        conditionDescription = "Custom [${rule.direction}] 5m:[$low5..$high5] 60m:[$low60..$high60]",
+                        conditionDescription = "Custom [$effDir] 5m:[$low5..$high5] 60m:[$low60..$high60]",
                         priority = 1000 // Highest priority
                     )
                 }
@@ -414,7 +452,7 @@ object UserRuleRegistry {
      */
     fun isRuleVerified(ruleId: String): Boolean {
         if (ruleId.isBlank()) return false
-        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
+        val cleanId = canonicalizeRuleId(ruleId)
         if (unverifiedRuleIds.contains(cleanId)) return false
         if (verifiedRuleIds.contains(cleanId)) return true
         // Default: Any valid directional/matrix rule (U, D, M) or custom rule (C) is eligible for 100% Auto-Trade
@@ -426,7 +464,7 @@ object UserRuleRegistry {
      */
     fun toggleVerifiedRule(ruleId: String): Boolean {
         if (ruleId.isBlank()) return false
-        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
+        val cleanId = canonicalizeRuleId(ruleId)
         val currentlyVerified = isRuleVerified(cleanId)
         val isNowVerified = if (currentlyVerified) {
             verifiedRuleIds.remove(cleanId)
@@ -443,7 +481,7 @@ object UserRuleRegistry {
 
     fun setRuleVerified(ruleId: String, verified: Boolean) {
         if (ruleId.isBlank()) return
-        val cleanId = ruleId.replace("[", "").replace("]", "").uppercase().trim()
+        val cleanId = canonicalizeRuleId(ruleId)
         if (verified) {
             unverifiedRuleIds.remove(cleanId)
             verifiedRuleIds.add(cleanId)
@@ -541,40 +579,31 @@ data class BackupImportResult(
             }
             clean = clean.trim()
 
-            val root = JSONObject(clean)
             var overridesCount = 0
             var customRulesCount = 0
             var verifiedCount = 0
 
-            if (root.has("overrides")) {
-                val overridesObj = root.getJSONObject("overrides")
-                val keys = overridesObj.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next().uppercase().trim()
-                    val v = overridesObj.getString(k)
-                    val dir = try { TradeDirection.valueOf(v) } catch (_: Exception) { null }
-                    if (dir != null && k.isNotBlank()) {
-                        directionOverrides[k] = dir
-                        overridesCount++
-                    }
-                }
-                saveOverridesToPrefs()
-            }
-
-            if (root.has("customRules")) {
-                val rulesArr = root.getJSONArray("customRules")
+            // Support direct array of custom rules: [{"id":"C001",...}]
+            if (clean.startsWith("[")) {
+                val rulesArr = JSONArray(clean)
                 for (i in 0 until rulesArr.length()) {
-                    val obj = rulesArr.getJSONObject(i)
-                    val dir = try { TradeDirection.valueOf(obj.getString("direction")) } catch (_: Exception) { TradeDirection.UP }
-                    val id = obj.getString("id").uppercase().trim()
+                    val obj = rulesArr.optJSONObject(i) ?: continue
+                    val dirStr = obj.optString("direction", "UP")
+                    val dir = try { TradeDirection.valueOf(dirStr) } catch (_: Exception) { TradeDirection.UP }
+                    val rawId = obj.optString("id", "")
+                    val id = canonicalizeRuleId(rawId)
                     if (id.isNotBlank()) {
+                        val min5 = obj.optDouble("min5m", 0.0)
+                        val max5 = obj.optDouble("max5m", 0.0)
+                        val min60 = obj.optDouble("min60m", 0.0)
+                        val max60 = obj.optDouble("max60m", 0.0)
                         val rule = CustomRule(
                             id = id,
-                            title = obj.optString("title", ""),
-                            min5m = obj.getDouble("min5m"),
-                            max5m = obj.getDouble("max5m"),
-                            min60m = obj.getDouble("min60m"),
-                            max60m = obj.getDouble("max60m"),
+                            title = obj.optString("title", "Custom Rule $id"),
+                            min5m = minOf(min5, max5),
+                            max5m = maxOf(min5, max5),
+                            min60m = minOf(min60, max60),
+                            max60m = maxOf(min60, max60),
                             direction = dir,
                             isActive = obj.optBoolean("isActive", true),
                             createdAt = obj.optLong("createdAt", System.currentTimeMillis())
@@ -583,22 +612,78 @@ data class BackupImportResult(
                             customRules.removeAll { it.id.equals(rule.id, ignoreCase = true) }
                             customRules.add(rule)
                         }
+                        setRuleVerified(rule.id, true)
                         customRulesCount++
                     }
                 }
                 saveCustomRulesToPrefs()
-            }
+            } else {
+                val root = JSONObject(clean)
 
-            if (root.has("verifiedRules")) {
-                val verifiedArr = root.getJSONArray("verifiedRules")
-                for (i in 0 until verifiedArr.length()) {
-                    val id = verifiedArr.getString(i).uppercase().trim()
-                    if (id.isNotBlank()) {
-                        verifiedRuleIds.add(id)
-                        verifiedCount++
+                val overridesObj = root.optJSONObject("overrides")
+                if (overridesObj != null) {
+                    val keys = overridesObj.keys()
+                    while (keys.hasNext()) {
+                        val rawK = keys.next()
+                        val k = canonicalizeRuleId(rawK)
+                        val v = overridesObj.optString(rawK)
+                        val dir = try { TradeDirection.valueOf(v) } catch (_: Exception) { null }
+                        if (dir != null && k.isNotBlank()) {
+                            directionOverrides[k] = dir
+                            setRuleVerified(k, true)
+                            overridesCount++
+                        }
                     }
+                    saveOverridesToPrefs()
                 }
-                saveVerifiedRulesToPrefs()
+
+                val rulesArr = root.optJSONArray("customRules")
+                if (rulesArr != null) {
+                    for (i in 0 until rulesArr.length()) {
+                        val obj = rulesArr.optJSONObject(i) ?: continue
+                        val dirStr = obj.optString("direction", "UP")
+                        val dir = try { TradeDirection.valueOf(dirStr) } catch (_: Exception) { TradeDirection.UP }
+                        val rawId = obj.optString("id", "")
+                        val id = canonicalizeRuleId(rawId)
+                        if (id.isNotBlank()) {
+                            val min5 = obj.optDouble("min5m", 0.0)
+                            val max5 = obj.optDouble("max5m", 0.0)
+                            val min60 = obj.optDouble("min60m", 0.0)
+                            val max60 = obj.optDouble("max60m", 0.0)
+                            val rule = CustomRule(
+                                id = id,
+                                title = obj.optString("title", "Custom Rule $id"),
+                                min5m = minOf(min5, max5),
+                                max5m = maxOf(min5, max5),
+                                min60m = minOf(min60, max60),
+                                max60m = maxOf(min60, max60),
+                                direction = dir,
+                                isActive = obj.optBoolean("isActive", true),
+                                createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                            )
+                            synchronized(lock) {
+                                customRules.removeAll { it.id.equals(rule.id, ignoreCase = true) }
+                                customRules.add(rule)
+                            }
+                            setRuleVerified(rule.id, true)
+                            customRulesCount++
+                        }
+                    }
+                    saveCustomRulesToPrefs()
+                }
+
+                val verifiedArr = root.optJSONArray("verifiedRules")
+                if (verifiedArr != null) {
+                    for (i in 0 until verifiedArr.length()) {
+                        val id = canonicalizeRuleId(verifiedArr.optString(i, ""))
+                        if (id.isNotBlank()) {
+                            verifiedRuleIds.add(id)
+                            unverifiedRuleIds.remove(id)
+                            verifiedCount++
+                        }
+                    }
+                    saveVerifiedRulesToPrefs()
+                }
             }
 
             if (overridesCount == 0 && customRulesCount == 0 && verifiedCount == 0) {

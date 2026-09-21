@@ -86,6 +86,19 @@ import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import java.util.Locale
 
+/**
+ * Robust percentage parser handling +, -, unicode minus, comma decimal separators, and % symbols.
+ */
+private fun parsePercentageInput(raw: String): Double? {
+    val clean = raw.trim()
+        .replace("%", "")
+        .replace(",", ".")
+        .replace("−", "-")
+        .replace("+", "")
+        .trim()
+    return clean.toDoubleOrNull()
+}
+
 @Composable
 fun RuleManagerDialog(
     initialMatrixId: String? = null,
@@ -100,9 +113,17 @@ fun RuleManagerDialog(
     var refreshTick by remember { mutableIntStateOf(0) }
 
     // Overrides state
-    var editRuleId by remember { mutableStateOf(initialMatrixId?.replace("[", "")?.replace("]", "")?.trim() ?: "U001") }
+    val cleanInitialId = UserRuleRegistry.canonicalizeRuleId(initialMatrixId)
+    var editRuleId by remember { mutableStateOf(cleanInitialId.ifEmpty { "U001" }) }
     var selectedOverrideDirection by remember { mutableStateOf(TradeDirection.DOWN) }
     var overrideStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialMatrixId) {
+        val id = UserRuleRegistry.canonicalizeRuleId(initialMatrixId)
+        if (id.isNotBlank()) {
+            editRuleId = id
+        }
+    }
 
     // Custom Rule Form State
     var customRuleId by remember { mutableStateOf(UserRuleRegistry.getNextCustomRuleId()) }
@@ -253,7 +274,7 @@ fun RuleManagerDialog(
                         ) {
                             OutlinedTextField(
                                 value = editRuleId,
-                                onValueChange = { editRuleId = it.uppercase().trim() },
+                                onValueChange = { editRuleId = it.uppercase() },
                                 label = { Text("Rule ID (e.g. U001, D061)", fontSize = 11.sp) },
                                 modifier = Modifier.weight(1.2f),
                                 singleLine = true,
@@ -266,10 +287,11 @@ fun RuleManagerDialog(
                                 )
                             )
 
-                            if (initialMatrixId != null && initialMatrixId.isNotBlank()) {
+                            val canonicalInitial = UserRuleRegistry.canonicalizeRuleId(initialMatrixId)
+                            if (canonicalInitial.isNotBlank()) {
                                 Surface(
                                     onClick = {
-                                        editRuleId = initialMatrixId.replace("[", "").replace("]", "").trim()
+                                        editRuleId = canonicalInitial
                                     },
                                     shape = RoundedCornerShape(6.dp),
                                     color = DarkCard,
@@ -285,7 +307,7 @@ fun RuleManagerDialog(
                             }
                         }
 
-                        val cleanId = editRuleId.uppercase().trim()
+                        val cleanId = UserRuleRegistry.canonicalizeRuleId(editRuleId)
                         LaunchedEffect(cleanId) {
                             if (cleanId.isNotBlank()) {
                                 val currentOv = UserRuleRegistry.getRuleOverride(cleanId)
@@ -415,8 +437,9 @@ fun RuleManagerDialog(
                                 onClick = {
                                     if (cleanId.isNotBlank()) {
                                         UserRuleRegistry.setRuleOverride(cleanId, selectedOverrideDirection)
+                                        UserRuleRegistry.setRuleVerified(cleanId, true)
                                         refreshTick++
-                                        overrideStatusMessage = "✅ Rule $cleanId saved as ${selectedOverrideDirection.name}!"
+                                        overrideStatusMessage = "✅ Rule $cleanId saved as ${selectedOverrideDirection.name} & Verified (✓)!"
                                     }
                                 },
                                 shape = RoundedCornerShape(8.dp),
@@ -777,29 +800,38 @@ fun RuleManagerDialog(
                         ) {
                             Surface(
                                 onClick = {
-                                    val min5 = customMin5m.toDoubleOrNull()
-                                    val max5 = customMax5m.toDoubleOrNull()
-                                    val min60 = customMin60m.toDoubleOrNull()
-                                    val max60 = customMax60m.toDoubleOrNull()
+                                    val min5 = parsePercentageInput(customMin5m)
+                                    val max5 = parsePercentageInput(customMax5m)
+                                    val min60 = parsePercentageInput(customMin60m)
+                                    val max60 = parsePercentageInput(customMax60m)
 
-                                    if (min5 != null && max5 != null && min60 != null && max60 != null && customRuleId.isNotBlank()) {
+                                    if (min5 != null && max5 != null && min60 != null && max60 != null) {
+                                        val low5 = minOf(min5, max5)
+                                        val high5 = maxOf(min5, max5)
+                                        val low60 = minOf(min60, max60)
+                                        val high60 = maxOf(min60, max60)
+                                        val targetId = UserRuleRegistry.canonicalizeRuleId(
+                                            if (customRuleId.isBlank()) UserRuleRegistry.getNextCustomRuleId() else customRuleId
+                                        ).let { if (it.isBlank()) UserRuleRegistry.getNextCustomRuleId() else it }
+
                                         val newRule = CustomRule(
-                                            id = customRuleId.uppercase().trim(),
-                                            title = customRuleTitle.ifBlank { "Custom Rule $customRuleId" },
-                                            min5m = min5,
-                                            max5m = max5,
-                                            min60m = min60,
-                                            max60m = max60,
+                                            id = targetId,
+                                            title = customRuleTitle.ifBlank { "Custom Rule $targetId" },
+                                            min5m = low5,
+                                            max5m = high5,
+                                            min60m = low60,
+                                            max60m = high60,
                                             direction = customDirection,
                                             isActive = true
                                         )
                                         UserRuleRegistry.addOrUpdateCustomRule(newRule)
+                                        UserRuleRegistry.setRuleVerified(newRule.id, true)
                                         customRuleId = UserRuleRegistry.getNextCustomRuleId()
                                         customRuleTitle = ""
                                         refreshTick++
-                                        customStatusMessage = "✅ Custom rule ${newRule.id} activated!"
+                                        customStatusMessage = "✅ Custom rule ${newRule.id} saved, activated & verified (✓)!"
                                     } else {
-                                        customStatusMessage = "⚠️ Please enter valid bounds and Rule ID."
+                                        customStatusMessage = "⚠️ Please enter valid percentage numbers (e.g. 0.10, -0.20)."
                                     }
                                 },
                                 shape = RoundedCornerShape(8.dp),
@@ -814,6 +846,34 @@ fun RuleManagerDialog(
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.padding(vertical = 8.dp)
                                 )
+                            }
+
+                            if (isExistingRule) {
+                                Surface(
+                                    onClick = {
+                                        customRuleId = UserRuleRegistry.getNextCustomRuleId()
+                                        customRuleTitle = ""
+                                        val v5 = live5m ?: 0.10
+                                        val v60 = live60m ?: -0.20
+                                        customMin5m = String.format(Locale.US, "%.2f", v5 - 0.05)
+                                        customMax5m = String.format(Locale.US, "%.2f", v5 + 0.05)
+                                        customMin60m = String.format(Locale.US, "%.2f", v60 - 0.05)
+                                        customMax60m = String.format(Locale.US, "%.2f", v60 + 0.05)
+                                        customDirection = if (v5 >= 0) TradeDirection.UP else TradeDirection.DOWN
+                                        customStatusMessage = "Switched to creating a fresh new rule."
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = DarkCard,
+                                    border = BorderStroke(1.dp, BorderStrokeLight)
+                                ) {
+                                    Text(
+                                        text = "➕ New",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentCyan,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
+                                    )
+                                }
                             }
 
                             // Dedicated Verify Button with Checkmark

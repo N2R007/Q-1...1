@@ -967,8 +967,11 @@ fun QuantitativeMetricsGrid(
         }
     }
 
-    val isUp = activeSignal?.direction == TradeDirection.UP
-    val isDown = activeSignal?.direction == TradeDirection.DOWN
+    val effectiveActiveDir = activeSignal?.let { sig ->
+        UserRuleRegistry.getRuleOverride(sig.id) ?: sig.direction
+    }
+    val isUp = effectiveActiveDir == TradeDirection.UP
+    val isDown = effectiveActiveDir == TradeDirection.DOWN
 
     // Color assignment: User explicitly commanded UP = Green, DOWN = Red, and Grey when countdown expires.
     val activeColor = when {
@@ -1240,8 +1243,10 @@ fun QuantitativeMetricsGrid(
                         .testTag("signal_action_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (activeSignal != null) {
-                        val isSignalUp = activeSignal?.direction == TradeDirection.UP
+                    val currSignal = activeSignal
+                    if (currSignal != null) {
+                        val effectiveSignalDir = UserRuleRegistry.getRuleOverride(currSignal.id) ?: currSignal.direction
+                        val isSignalUp = effectiveSignalDir == TradeDirection.UP
                         val iconColor = if (isSignalActive) Color.White else Color(0xFF9CA3AF)
                         val textColor = if (isSignalActive) Color.White else Color(0xFF9CA3AF)
 
@@ -1391,7 +1396,8 @@ fun QuantitativeMetricsGrid(
                 val baseTier = if (!matchedRuleId.isNullOrBlank()) {
                     UserRuleRegistry.getRuleTierSimple(matchedRuleId)
                 } else ""
-                val signalDirection = activeSignal?.direction ?: analysis?.direction ?: analysis?.canonicalDecision?.direction
+                val ruleOverride = matchedRuleId?.let { UserRuleRegistry.getRuleOverride(it) }
+                val signalDirection = ruleOverride ?: activeSignal?.direction ?: analysis?.direction ?: analysis?.canonicalDecision?.direction
 
                 val dynamicBadgeText: String = when {
                     isPullbackActive -> "PULLBACK"
@@ -1498,11 +1504,39 @@ fun QuantitativeMetricsGrid(
     }
 
     if (showRuleManagerDialog) {
+        val latchedM5 = latched5mValue ?: analysis?.change5mValue
+        val latchedM60 = latched60mValue ?: analysis?.change60mValue
+        val currentTargetRuleId = activeSignal?.id
+            ?: lastAlertedRuleId
+            ?: analysis?.primaryMatrixId
+            ?: analysis?.canonicalDecision?.primaryMatrixId
+            ?: (if (latchedM5 != null && latchedM60 != null) {
+                Authorized106MatrixEngine.evaluate(latchedM5, latchedM60)?.id
+            } else null)
         RuleManagerDialog(
-            initialMatrixId = activeSignal?.id,
-            live5m = analysis?.change5mValue,
-            live60m = analysis?.change60mValue,
-            onDismiss = { showRuleManagerDialog = false }
+            initialMatrixId = currentTargetRuleId,
+            live5m = latchedM5,
+            live60m = latchedM60,
+            onDismiss = {
+                showRuleManagerDialog = false
+                refreshVerifiedState++
+                isNewChangeTrigger++
+                val m5 = latched5mValue ?: analysis?.change5mValue
+                val m60 = latched60mValue ?: analysis?.change60mValue
+                if (m5 != null && m60 != null) {
+                    val updatedMatch = com.example.data.matrix.Authorized106MatrixEngine.evaluate(
+                        val5m = m5,
+                        val60m = m60,
+                        val1d = latched1dValue ?: analysis?.change1dValue,
+                        history = metricSnapshots
+                    )
+                    if (updatedMatch != null) {
+                        activeSignal = updatedMatch
+                        isSignalActive = true
+                        onQuantSignalChanged(updatedMatch, true, analysis)
+                    }
+                }
+            }
         )
     }
 }

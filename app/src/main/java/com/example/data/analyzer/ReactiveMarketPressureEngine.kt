@@ -520,12 +520,17 @@ object ReactiveMarketPressureEngine {
         }
 
         val matched206 = Directional206MatrixEngine.evaluate(valid5m, valid60m, null, history)
-        val finalResolvedDirection = if (isDeadMarket || isHardConflictOrHold || resolvedDirection == TradeDirection.NEUTRAL) {
+        val candidateRuleId = matched206?.id ?: matrixResult.primaryMatrix?.id ?: canonicalDecision.primaryMatrixId
+        val ruleOverrideDir = candidateRuleId?.let { com.example.data.matrix.UserRuleRegistry.getRuleOverride(it) }
+
+        val finalResolvedDirection = ruleOverrideDir ?: if (isDeadMarket || isHardConflictOrHold || resolvedDirection == TradeDirection.NEUTRAL) {
             TradeDirection.NEUTRAL
         } else {
             matched206?.direction ?: resolvedDirection
         }
-        val finalIsNoTrade = if (isDeadMarket || isHardConflictOrHold || finalResolvedDirection == TradeDirection.NEUTRAL) {
+        val finalIsNoTrade = if (ruleOverrideDir != null) {
+            false
+        } else if (isDeadMarket || isHardConflictOrHold || finalResolvedDirection == TradeDirection.NEUTRAL) {
             true
         } else {
             baseIsNoTrade

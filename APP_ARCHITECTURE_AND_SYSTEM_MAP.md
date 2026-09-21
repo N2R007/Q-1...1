@@ -446,7 +446,26 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
   - **Frictionless Sanitization**: Accepts full URLs (`ws://192.168.1.15:8765`) or plain IP addresses (`192.168.1.15`), automatically prefixing `ws://` and appending `:8765`.
   - **Instant Save & Auto-Connect**: Tapping "Save" immediately updates `WebSocketTradeRelay.serverUrl` and `AutoTradeBridge.savedServerUrl`, closes any stale sockets cleanly, and initiates an immediate connection attempt to the target server with user feedback ("Connecting to Laptop: ws://...").
 
-### 12. `TradingDashboard.kt`
+### 12. `UserRuleRegistry.kt` & `RuleManagerDialog.kt` (Rule Override, Custom Rules & Direction Management)
+- **Central Source of Truth for Rule Overrides & Custom Rules**:
+  - Stores user overrides for all 312 system matrix rules (U001-U103, D001-D103, M001-M106) and user-defined custom rules (C001+) in persistent `SharedPreferences` as JSON.
+  - Allows the user to convert any rule direction (e.g. converting a DOWN rule like `D061` into an `UP` rule) and mark it as verified (`✓ Verified`).
+  - **Universal Canonical Rule ID Formatter (`canonicalizeRuleId`)**: Automatically normalizes any user or system rule ID representation (e.g., `u1` -> `U001`, `d61` -> `D061`, `m42` -> `M042`, `c1` -> `C001`, `[D061]` -> `D061`) into standard 3-digit canonical uppercase format. Eliminates case sensitivity, missing leading zeros, and bracket mismatch issues across overrides, verification, and UI lookups.
+  - **Custom Rule Engine (`evaluateCustomRules`)**: Evaluates user-defined custom rules (C001, C002, etc.) at the highest priority before any built-in 206/312 matrix rules. Includes double-precision epsilon boundary tolerance (`0.0001`) to prevent floating-point boundary drops, and respects rule direction overrides.
+  - **Bulletproof Numeric Bounds Parser (`parsePercentageInput`)**: Safely parses user percentage inputs containing leading `+`, `-`, unicode minus (`−`), comma decimals (`0,15` -> `0.15`), and `%` symbols (`0.15%` -> `0.15`). Automatically enforces interval ordering using `minOf`/`maxOf` so rules work reliably even if the user accidentally swaps min and max inputs.
+  - **Auto-Verification on Save**: Whenever a user saves an override or a custom rule, it is automatically marked as verified (`✓`), ensuring 100% immediate auto-trade execution readiness without requiring a separate manual verify tap.
+  - **Comprehensive Pipeline Enforcement**: Overrides and custom rules in `UserRuleRegistry` are respected across the entire pipeline:
+    1. `Authorized106MatrixEngine.evaluate`: Directly evaluates custom rules first and applies overridden directions in `Matrix106Match`.
+    2. `MatrixEvaluationEngine`: Checks overrides for matrix effective direction, active directional conflict resolution, and primary matrix selection.
+    3. `CanonicalDecisionEngine`: Checks overrides during dead-zone analysis and default direction resolution.
+    4. `ReactiveMarketPressureEngine`: Uses overrides to override the final resolved trade direction and unblock trades.
+    5. `MainViewModel`: In both `onQuantSignalChanged` and `evaluateAndDispatchAutoTrade`, strictly enforces the overridden direction so auto-trades fire with the user-selected direction.
+    6. `TradingDashboard`: Reads `UserRuleRegistry.getRuleOverride` for the active signal so the QUANT right button, badge, and arrows visually display the converted direction (UP = Green, DOWN = Red).
+  - **Dynamic Context Pre-Fill**: Opening `RuleManagerDialog` automatically pre-fills with the active live screen rule ID (e.g. `D061`), or calculates the active rule from the latched screen percentages, eliminating manual typing mistakes.
+  - **Instant UI Refresh**: When the user saves an override or closes `RuleManagerDialog`, the dashboard immediately re-evaluates the active signal using the latched 5m/60m percentages, instantly updating the on-screen signal and button state without requiring a manual app restart.
+  - **Robust Backup Import/Export**: Supports complete backup/restore of custom rules, overrides, and verification sets with JSON validation, direct array support, and detailed import feedback.
+
+### 13. `TradingDashboard.kt`
 - The complete Jetpack Compose user interface.
 - Renders the camera feed with animated targeting reticle.
 - Displays the large Direction Card (CALL / PUT / WAIT).

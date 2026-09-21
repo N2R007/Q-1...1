@@ -156,10 +156,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isActive: Boolean,
         analysis: TradingAnalysis? = null
     ) {
-        _quantActiveSignal.value = signal
+        val effectiveDir = signal?.let { com.example.data.matrix.UserRuleRegistry.getRuleOverride(it.id) ?: it.direction }
+        val effectiveSignal = if (signal != null && effectiveDir != null && effectiveDir != signal.direction) {
+            signal.copy(direction = effectiveDir)
+        } else {
+            signal
+        }
+        _quantActiveSignal.value = effectiveSignal
         _isQuantSignalActive.value = isActive
 
-        if (isActive && signal != null && (signal.direction == TradeDirection.UP || signal.direction == TradeDirection.DOWN)) {
+        if (isActive && effectiveSignal != null && (effectiveSignal.direction == TradeDirection.UP || effectiveSignal.direction == TradeDirection.DOWN)) {
             val targetAnalysis = analysis ?: _uiState.value.currentAnalysis
             val v5 = targetAnalysis?.change5mValue
             val v60 = targetAnalysis?.change60mValue
@@ -1360,7 +1366,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val activeQuant = _quantActiveSignal.value ?: return
-        if (activeQuant.direction != TradeDirection.UP && activeQuant.direction != TradeDirection.DOWN) {
+        val activeEffDir = com.example.data.matrix.UserRuleRegistry.getRuleOverride(activeQuant.id) ?: activeQuant.direction
+        if (activeEffDir != TradeDirection.UP && activeEffDir != TradeDirection.DOWN) {
             return
         }
 

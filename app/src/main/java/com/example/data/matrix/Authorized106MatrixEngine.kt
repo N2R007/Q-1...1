@@ -36,12 +36,15 @@ object Authorized106MatrixEngine {
             history = history
         ) ?: return null
 
+        val effDir = UserRuleRegistry.getRuleOverride(res.id) ?: res.direction
         return Matrix106Match(
             id = res.id,
-            direction = res.direction,
+            direction = effDir,
             outputCode = res.outputCode,
             title = res.title,
-            conditionDescription = res.conditionDescription,
+            conditionDescription = if (effDir != res.direction) {
+                "User Override ${res.id}: [$effDir] (Default: ${res.direction}) ${res.outputCode}"
+            } else res.conditionDescription,
             priority = res.priority
         )
     }

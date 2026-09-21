@@ -216,7 +216,11 @@ object CanonicalDecisionEngine {
 
         // 1. Dead Zone / Sub-Threshold Movement: Resolve entry directly from detected numbers under user mandate
         // "যখনই স্ক্রিনে পার্সেন্টেজ ডিটেক্ট করবে যে নাম্বার আসবে ওই নাম্বার অনুযায়ী এন্ট্রি দিবে"
+        val primaryMatrixId = effectiveMatrixResult.primaryMatrix?.id
+        val primaryOverride = primaryMatrixId?.let { com.example.data.matrix.UserRuleRegistry.getRuleOverride(it) }
+
         val defaultDir = when {
+            primaryOverride != null -> primaryOverride
             effectiveMatrixResult.primaryMatrix != null && effectiveMatrixResult.primaryMatrix.direction != TradeDirection.NEUTRAL -> effectiveMatrixResult.primaryMatrix.direction
             v5 != null && v5 > 0.0 -> TradeDirection.UP
             v5 != null && v5 < 0.0 -> TradeDirection.DOWN
@@ -418,7 +422,10 @@ object CanonicalDecisionEngine {
             effectiveDownPct = round((100.0 - effectiveUpPct) * 100.0) / 100.0
             effectiveExplanation = "সোজা গতিবেগ (Direct Momentum): 5M (${String.format(Locale.US, "%+.2f", v5)}%) ও 60M (${String.format(Locale.US, "%+.2f", v60)}%) একমুখী প্রসারিত | প্রধান চালক: ${effectiveKinetic.primaryDriverTimeframe} | $effectiveSide দ্রুত এন্ট্রি সক্রিয়।"
         } else {
+            val primaryMatrixId = effectiveMatrixResult.primaryMatrix?.id
+            val primaryOverride = primaryMatrixId?.let { com.example.data.matrix.UserRuleRegistry.getRuleOverride(it) }
             val resolvedDir = when {
+                primaryOverride != null -> primaryOverride
                 candidateDirection != TradeDirection.NEUTRAL -> candidateDirection
                 effectiveMatrixResult.primaryMatrix != null && effectiveMatrixResult.primaryMatrix.direction != TradeDirection.NEUTRAL -> effectiveMatrixResult.primaryMatrix.direction
                 v5 != null && v5 > 0.0 -> TradeDirection.UP

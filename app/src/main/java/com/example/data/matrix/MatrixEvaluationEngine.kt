@@ -136,7 +136,8 @@ object MatrixEvaluationEngine {
                 MatrixUserState.CHECKED -> {
                     if (matched) {
                         eligibleMatrixIds.add(matrix.id)
-                        val effectiveDirection = when (matrix.direction) {
+                        val overrideDir = UserRuleRegistry.getRuleOverride(matrix.id)
+                        val effectiveDirection = overrideDir ?: when (matrix.direction) {
                             TradeDirection.UP -> TradeDirection.UP
                             TradeDirection.DOWN -> TradeDirection.DOWN
                             else -> {
@@ -326,7 +327,7 @@ object MatrixEvaluationEngine {
             !it.warningOnly && (it.direction == TradeDirection.UP || it.direction == TradeDirection.DOWN)
         }
 
-        val primary: QuantitativeMatrix? = when {
+        val primaryCandidate: QuantitativeMatrix? = when {
             isConflicting -> {
                 // Conflict resolution: pick highest priority CHECKED safety matrix or M130
                 val checkedSafetyCandidate = checkedCandidates.firstOrNull {
@@ -345,6 +346,15 @@ object MatrixEvaluationEngine {
                 MatrixCatalog.getById("M132")
             }
         }
+
+        val primary: QuantitativeMatrix? = if (primaryCandidate != null) {
+            val primaryOverride = UserRuleRegistry.getRuleOverride(primaryCandidate.id)
+            if (primaryOverride != null && primaryOverride != primaryCandidate.direction) {
+                primaryCandidate.copy(direction = primaryOverride)
+            } else {
+                primaryCandidate
+            }
+        } else null
 
         if (primary != null) {
             val pState = MatrixUserStateRegistry.getUserState(primary)
