@@ -24,6 +24,19 @@ data class CustomRule(
 )
 
 /**
+ * Data class representing a rule item for the verification matrix interface.
+ */
+data class MatrixRuleVerificationItem(
+    val serial: Int,
+    val id: String,
+    val defaultDirection: TradeDirection,
+    val title: String,
+    val category: String,
+    val isCustom: Boolean = false,
+    val globalSerial: Int = serial
+)
+
+/**
  * Registry for:
  * 1. User direction overrides on existing 206 directional rules (e.g. U001 -> DOWN).
  * 2. User-created custom rules captured from live screen or created manually.
@@ -41,14 +54,16 @@ object UserRuleRegistry {
     private const val KEY_INIT_VERIFIED_HIGH_V2 = "init_verified_high_v2"
     private const val KEY_INIT_VERIFIED_ALL_V3 = "init_verified_all_v3"
 
-    // Complete System Rule Catalog (U001-U103, D001-D103, M001-M106)
+    // Complete System Rule Catalog (D001-D165, U001-U103, M001-M165)
     val ALL_SYSTEM_RULE_IDS: Set<String> by lazy {
         val set = LinkedHashSet<String>()
-        for (i in 1..103) {
-            set.add("U%03d".format(i))
+        for (i in 1..165) {
             set.add("D%03d".format(i))
         }
-        for (i in 1..106) {
+        for (i in 1..103) {
+            set.add("U%03d".format(i))
+        }
+        for (i in 1..165) {
             set.add("M%03d".format(i))
         }
         set
@@ -123,6 +138,13 @@ object UserRuleRegistry {
             val num = match.groupValues[2].toIntOrNull()
             if (num != null) {
                 return "%s%03d".format(prefix, num)
+            }
+        }
+        val pureDigitsMatch = Regex("^(\\d+)$").find(clean)
+        if (pureDigitsMatch != null) {
+            val num = pureDigitsMatch.groupValues[1].toIntOrNull()
+            if (num != null) {
+                return "M%03d".format(num)
             }
         }
         return clean
@@ -504,6 +526,320 @@ object UserRuleRegistry {
         verifiedRuleIds.clear()
         unverifiedRuleIds.addAll(ALL_SYSTEM_RULE_IDS)
         saveVerifiedRulesToPrefs()
+    }
+
+    /**
+     * Batch update rule verification states and persist to SharedPreferences in a single pass.
+     */
+    fun setRulesBatchVerified(updates: Map<String, Boolean>) {
+        updates.forEach { (ruleId, verified) ->
+            val cleanId = canonicalizeRuleId(ruleId)
+            if (cleanId.isNotBlank()) {
+                if (verified) {
+                    unverifiedRuleIds.remove(cleanId)
+                    verifiedRuleIds.add(cleanId)
+                } else {
+                    verifiedRuleIds.remove(cleanId)
+                    unverifiedRuleIds.add(cleanId)
+                }
+            }
+        }
+        saveVerifiedRulesToPrefs()
+    }
+
+    /**
+     * Complete directional rule output code mapping for U001-U103 and D001-D103.
+     */
+    val SYSTEM_DIRECTIONAL_TITLES: Map<String, String> by lazy {
+        mapOf(
+            "U001" to "ULTRA_LOW_ALIGNED_UP",
+            "U002" to "LOW_VOLATILITY_5M_LEAD",
+            "U003" to "LOW_VOLATILITY_60M_LEAD",
+            "U004" to "LOW_VOLATILITY_ALIGNED_UP",
+            "U005" to "EARLY_IMPULSE_5M_LEAD_A",
+            "U006" to "EARLY_IMPULSE_5M_LEAD_B",
+            "U007" to "STEADY_ACCUMULATION_60M_LEAD_A",
+            "U008" to "STEADY_ACCUMULATION_60M_LEAD_B",
+            "U009" to "BALANCED_BULLISH_EXPANSION_LOW",
+            "U010" to "BALANCED_BULLISH_EXPANSION_MID",
+            "U011" to "FAST_MOMENTUM_SURGE_5M_A",
+            "U012" to "FAST_MOMENTUM_SURGE_5M_B",
+            "U013" to "STRONG_ANCHOR_TREND_UP_A",
+            "U014" to "STRONG_ANCHOR_TREND_UP_B",
+            "U015" to "HIGH_VELOCITY_BREAKOUT_A",
+            "U016" to "HIGH_VELOCITY_BREAKOUT_B",
+            "U017" to "MID_RANGE_CONFLUENCE_UP_A",
+            "U018" to "MID_RANGE_CONFLUENCE_UP_B",
+            "U019" to "AGGRESSIVE_PARABOLIC_IMPULSE_A",
+            "U020" to "AGGRESSIVE_PARABOLIC_IMPULSE_B",
+            "U021" to "INSTITUTIONAL_HEAVY_ACCUMULATION_A",
+            "U022" to "INSTITUTIONAL_HEAVY_ACCUMULATION_B",
+            "U023" to "POWER_SURGE_DUAL_EXPANSION_A",
+            "U024" to "POWER_SURGE_DUAL_EXPANSION_B",
+            "U025" to "STEADY_HEAVY_ACCUMULATION_A",
+            "U026" to "STEADY_HEAVY_ACCUMULATION_B",
+            "U027" to "EXTREME_MICRO_SQUEEZE_UP_LOW",
+            "U028" to "EXTREME_MICRO_SQUEEZE_UP_HIGH",
+            "U029" to "HYPER_MICRO_SQUEEZE_BLOWOUT",
+            "U030" to "EXTREME_MACRO_EXPANSION_DOWN_LOW",
+            "U031" to "EXTREME_MACRO_EXPANSION_UP_HIGH",
+            "U032" to "HYPER_MACRO_EXPANSION_BLOWOUT",
+            "U033" to "HYPER_VOLATILITY_MICRO_BREAKOUT",
+            "U034" to "HYPER_VOLATILITY_MACRO_BREAKOUT",
+            "U035" to "TOTAL_PARABOLIC_CLIMAX_UP",
+            "U036" to "MEGA_PARABOLIC_SUPER_CLIMAX",
+            "U037" to "SHALLOW_PULLBACK_DIP_BUY",
+            "U038" to "LIGHT_PULLBACK_DIP_BUY",
+            "U039" to "DEEP_ANCHOR_SHALLOW_PULLBACK",
+            "U040" to "DEEP_ANCHOR_LIGHT_PULLBACK",
+            "U041" to "MEDIUM_PULLBACK_SUPPORT_REJOIN",
+            "U042" to "DEEP_PULLBACK_HEAVY_SUPPORT",
+            "U043" to "EXTREME_DIP_STRONG_BULL_TREND",
+            "U044" to "MAXIMUM_DIP_MACRO_BULL_RECOVERY",
+            "U045" to "WEAK_REBOUND_EARLY_ATTEMPT_A",
+            "U046" to "WEAK_REBOUND_EARLY_ATTEMPT_B",
+            "U047" to "BULLISH_DIVERGENCE_CONFIRMED_A",
+            "U048" to "BULLISH_DIVERGENCE_CONFIRMED_B",
+            "U049" to "STRONG_COUNTER_TREND_PUMP_A",
+            "U050" to "STRONG_COUNTER_TREND_PUMP_B",
+            "U051" to "HEAVY_BEAR_DIVERGENCE_REVERSAL_A",
+            "U052" to "HEAVY_BEAR_DIVERGENCE_REVERSAL_B",
+            "U053" to "MACRO_BOTTOM_EXHAUSTION_REBOUND",
+            "U054" to "EXTREME_V_BOTTOM_REVERSAL",
+            "U055" to "CONSOLIDATION_MICRO_BREAKOUT_A",
+            "U056" to "CONSOLIDATION_MICRO_BREAKOUT_B",
+            "U057" to "RANGE_HIGH_VOLATILITY_ESCAPE_A",
+            "U058" to "RANGE_HIGH_VOLATILITY_ESCAPE_B",
+            "U059" to "EXPLOSIVE_RANGE_BREAKOUT_A",
+            "U060" to "EXPLOSIVE_RANGE_BREAKOUT_B",
+            "U061" to "HOURLY_BULLISH_DRIFT_A",
+            "U062" to "HOURLY_BULLISH_DRIFT_B",
+            "U063" to "HOURLY_STRONG_ACCUMULATION_A",
+            "U064" to "HOURLY_STRONG_ACCUMULATION_B",
+            "U065" to "HARMONIC_LOW_ALIGNMENT_A",
+            "U066" to "HARMONIC_LOW_ALIGNMENT_B",
+            "U067" to "HARMONIC_MID_ALIGNMENT_A",
+            "U068" to "HARMONIC_MID_ALIGNMENT_B",
+            "U069" to "HARMONIC_HIGH_ALIGNMENT_A",
+            "U070" to "HARMONIC_HIGH_ALIGNMENT_B",
+            "U071" to "ASYMMETRIC_5M_DOMINANCE_LOW_A",
+            "U072" to "ASYMMETRIC_5M_DOMINANCE_LOW_B",
+            "U073" to "ASYMMETRIC_5M_DOMINANCE_HIGH_A",
+            "U074" to "ASYMMETRIC_5M_DOMINANCE_HIGH_B",
+            "U075" to "ASYMMETRIC_60M_DOMINANCE_LOW_A",
+            "U076" to "ASYMMETRIC_60M_DOMINANCE_LOW_B",
+            "U077" to "ASYMMETRIC_60M_DOMINANCE_HIGH_A",
+            "U078" to "ASYMMETRIC_60M_DOMINANCE_HIGH_B",
+            "U079" to "EARLY_V_SHAPE_RECOVERY_A",
+            "U080" to "EARLY_V_SHAPE_RECOVERY_B",
+            "U081" to "CONFIRMED_V_SHAPE_RECOVERY_A",
+            "U082" to "CONFIRMED_V_SHAPE_RECOVERY_B",
+            "U083" to "EXPLOSIVE_V_SHAPE_RECOVERY_A",
+            "U084" to "EXPLOSIVE_V_SHAPE_RECOVERY_B",
+            "U085" to "MICRO_LEAD_SLIGHT_MACRO_POSITIVE_A",
+            "U086" to "MICRO_LEAD_SLIGHT_MACRO_POSITIVE_B",
+            "U087" to "STRONG_MICRO_LEAD_SLIGHT_MACRO_POSITIVE_A",
+            "U088" to "STRONG_MICRO_LEAD_SLIGHT_MACRO_POSITIVE_B",
+            "U089" to "SLIGHT_MICRO_POSITIVE_MACRO_LEAD_A",
+            "U090" to "SLIGHT_MICRO_POSITIVE_MACRO_LEAD_B",
+            "U091" to "SLIGHT_MICRO_POSITIVE_STRONG_MACRO_LEAD_A",
+            "U092" to "SLIGHT_MICRO_POSITIVE_STRONG_MACRO_LEAD_B",
+            "U093" to "MICRO_PULSE_NEUTRAL_MACRO_A",
+            "U094" to "MICRO_PULSE_NEUTRAL_MACRO_B",
+            "U095" to "STRONG_MICRO_PULSE_NEUTRAL_MACRO_A",
+            "U096" to "STRONG_MICRO_PULSE_NEUTRAL_MACRO_B",
+            "U097" to "INTENSE_SQUEEZE_AGAINST_BEAR_A",
+            "U098" to "INTENSE_SQUEEZE_AGAINST_BEAR_B",
+            "U099" to "MONSTER_BREAKOUT_FROM_SQUEEZE_A",
+            "U100" to "MONSTER_BREAKOUT_FROM_SQUEEZE_B",
+            "U101" to "MICRO_CONSOLIDATION_DRIFT_UP",
+            "U102" to "ANCHORED_BULLISH_CONTINUATION",
+            "U103" to "AGGRESSIVE_NET_SUM_EXPANSION_UP",
+            "D001" to "ULTRA_LOW_ALIGNED_DOWN",
+            "D002" to "LOW_VOLATILITY_5M_DROP_LEAD",
+            "D003" to "LOW_VOLATILITY_60M_DUMP_LEAD",
+            "D004" to "LOW_VOLATILITY_ALIGNED_DOWN",
+            "D005" to "EARLY_IMPULSE_5M_DUMP_A",
+            "D006" to "EARLY_IMPULSE_5M_DUMP_B",
+            "D007" to "STEADY_DISTRIBUTION_60M_LEAD_A",
+            "D008" to "STEADY_DISTRIBUTION_60M_LEAD_B",
+            "D009" to "BALANCED_BEARISH_EXPANSION_LOW",
+            "D010" to "BALANCED_BEARISH_EXPANSION_MID",
+            "D011" to "FAST_SELLING_SURGE_5M_A",
+            "D012" to "FAST_SELLING_SURGE_5M_B",
+            "D013" to "STRONG_ANCHOR_TREND_DOWN_A",
+            "D014" to "STRONG_ANCHOR_TREND_DOWN_B",
+            "D015" to "HIGH_VELOCITY_BREAKDOWN_A",
+            "D016" to "HIGH_VELOCITY_BREAKDOWN_B",
+            "D017" to "MID_RANGE_CONFLUENCE_DOWN_A",
+            "D018" to "MID_RANGE_CONFLUENCE_DOWN_B",
+            "D019" to "AGGRESSIVE_WATERFALL_IMPULSE_A",
+            "D020" to "AGGRESSIVE_WATERFALL_IMPULSE_B",
+            "D021" to "INSTITUTIONAL_HEAVY_SELLING_A",
+            "D022" to "INSTITUTIONAL_HEAVY_SELLING_B",
+            "D023" to "CASCADING_DUAL_DUMP_A",
+            "D024" to "CASCADING_DUAL_DUMP_B",
+            "D025" to "STEADY_HEAVY_DISTRIBUTION_A",
+            "D026" to "STEADY_HEAVY_DISTRIBUTION_B",
+            "D027" to "EXTREME_MICRO_FLASH_DUMP_LOW",
+            "D028" to "EXTREME_MICRO_FLASH_DUMP_HIGH",
+            "D029" to "HYPER_MICRO_FLASH_CRASH",
+            "D030" to "EXTREME_MACRO_CAPITULATION_LOW",
+            "D031" to "EXTREME_MACRO_CAPITULATION_HIGH",
+            "D032" to "HYPER_MACRO_CAPITULATION_CRASH",
+            "D033" to "HYPER_VOLATILITY_MICRO_DUMP",
+            "D034" to "HYPER_VOLATILITY_MACRO_DUMP",
+            "D035" to "TOTAL_PARABOLIC_WATERFALL_DOWN",
+            "D036" to "MEGA_PARABOLIC_SUPER_CRASH",
+            "D037" to "SHALLOW_RALLY_PULLBACK_SELL",
+            "D038" to "LIGHT_RALLY_PULLBACK_SELL",
+            "D039" to "DEEP_ANCHOR_SHALLOW_RALLY",
+            "D040" to "DEEP_ANCHOR_LIGHT_RALLY",
+            "D041" to "MEDIUM_RALLY_RESISTANCE_REJECT",
+            "D042" to "DEEP_RALLY_HEAVY_RESISTANCE",
+            "D043" to "EXTREME_RALLY_STRONG_BEAR_TREND",
+            "D044" to "MAXIMUM_RALLY_MACRO_BEAR_REJECTION",
+            "D045" to "WEAK_DROP_EARLY_ATTEMPT_A",
+            "D046" to "WEAK_DROP_EARLY_ATTEMPT_B",
+            "D047" to "BEARISH_DIVERGENCE_CONFIRMED_A",
+            "D048" to "BEARISH_DIVERGENCE_CONFIRMED_B",
+            "D049" to "STRONG_COUNTER_TREND_DUMP_A",
+            "D050" to "STRONG_COUNTER_TREND_DUMP_B",
+            "D051" to "HEAVY_BULL_DIVERGENCE_REVERSAL_A",
+            "D052" to "HEAVY_BULL_DIVERGENCE_REVERSAL_B",
+            "D053" to "MACRO_TOP_EXHAUSTION_REJECTION",
+            "D054" to "EXTREME_V_TOP_REJECTION",
+            "D055" to "CONSOLIDATION_MICRO_BREAKDOWN_A",
+            "D056" to "CONSOLIDATION_MICRO_BREAKDOWN_B",
+            "D057" to "RANGE_HIGH_VOLATILITY_DROP_A",
+            "D058" to "RANGE_HIGH_VOLATILITY_DROP_B",
+            "D059" to "EXPLOSIVE_RANGE_BREAKDOWN_A",
+            "D060" to "EXPLOSIVE_RANGE_BREAKDOWN_B",
+            "D061" to "HOURLY_BEARISH_DRIFT_A",
+            "D062" to "HOURLY_BEARISH_DRIFT_B",
+            "D063" to "HOURLY_STRONG_DISTRIBUTION_A",
+            "D064" to "HOURLY_STRONG_DISTRIBUTION_B",
+            "D065" to "HARMONIC_LOW_BEAR_ALIGNMENT_A",
+            "D066" to "HARMONIC_LOW_BEAR_ALIGNMENT_B",
+            "D067" to "HARMONIC_MID_BEAR_ALIGNMENT_A",
+            "D068" to "HARMONIC_MID_BEAR_ALIGNMENT_B",
+            "D069" to "HARMONIC_HIGH_BEAR_ALIGNMENT_A",
+            "D070" to "HARMONIC_HIGH_BEAR_ALIGNMENT_B",
+            "D071" to "ASYMMETRIC_5M_BEAR_LOW_A",
+            "D072" to "ASYMMETRIC_5M_BEAR_LOW_B",
+            "D073" to "ASYMMETRIC_5M_BEAR_HIGH_A",
+            "D074" to "ASYMMETRIC_5M_BEAR_HIGH_B",
+            "D075" to "ASYMMETRIC_60M_BEAR_LOW_A",
+            "D076" to "ASYMMETRIC_60M_BEAR_LOW_B",
+            "D077" to "ASYMMETRIC_60M_BEAR_HIGH_A",
+            "D078" to "ASYMMETRIC_60M_BEAR_HIGH_B",
+            "D079" to "EARLY_INVERTED_V_REVERSAL_A",
+            "D080" to "EARLY_INVERTED_V_REVERSAL_B",
+            "D081" to "CONFIRMED_INVERTED_V_REVERSAL_A",
+            "D082" to "CONFIRMED_INVERTED_V_REVERSAL_B",
+            "D083" to "EXPLOSIVE_INVERTED_V_REVERSAL_A",
+            "D084" to "EXPLOSIVE_INVERTED_V_REVERSAL_B",
+            "D085" to "MICRO_DROP_SLIGHT_MACRO_NEGATIVE_A",
+            "D086" to "MICRO_DROP_SLIGHT_MACRO_NEGATIVE_B",
+            "D087" to "STRONG_MICRO_DROP_SLIGHT_MACRO_NEGATIVE_A",
+            "D088" to "STRONG_MICRO_DROP_SLIGHT_MACRO_NEGATIVE_B",
+            "D089" to "SLIGHT_MICRO_NEGATIVE_MACRO_LEAD_A",
+            "D090" to "SLIGHT_MICRO_NEGATIVE_MACRO_LEAD_B",
+            "D091" to "SLIGHT_MICRO_NEGATIVE_STRONG_MACRO_LEAD_A",
+            "D092" to "SLIGHT_MICRO_NEGATIVE_STRONG_MACRO_LEAD_B",
+            "D093" to "MICRO_DROP_NEUTRAL_MACRO_A",
+            "D094" to "MICRO_DROP_NEUTRAL_MACRO_B",
+            "D095" to "STRONG_MICRO_DROP_NEUTRAL_MACRO_A",
+            "D096" to "STRONG_MICRO_DROP_NEUTRAL_MACRO_B",
+            "D097" to "INTENSE_DUMP_AGAINST_BULL_A",
+            "D098" to "INTENSE_DUMP_AGAINST_BULL_B",
+            "D099" to "MONSTER_BREAKDOWN_FROM_SQUEEZE_A",
+            "D100" to "MONSTER_BREAKDOWN_FROM_SQUEEZE_B",
+            "D101" to "MICRO_CONSOLIDATION_DRIFT_DOWN",
+            "D102" to "ANCHORED_BEARISH_CONTINUATION",
+            "D103" to "AGGRESSIVE_NET_SUM_EXPANSION_DOWN"
+        )
+    }
+
+    /**
+     * Retrieves all available system and custom rules formatted for the verification matrix view.
+     */
+    fun getAllMatrixRulesForVerification(): List<MatrixRuleVerificationItem> {
+        val result = ArrayList<MatrixRuleVerificationItem>()
+        var globalCounter = 1
+
+        // 1. D001 to D165 (Down Directional Matrix Rules)
+        for (i in 1..165) {
+            val id = "D%03d".format(i)
+            val title = SYSTEM_DIRECTIONAL_TITLES[id] ?: "EXTENDED_DOWN_VECTOR_$id"
+            result.add(
+                MatrixRuleVerificationItem(
+                    serial = i,
+                    id = id,
+                    defaultDirection = TradeDirection.DOWN,
+                    title = title,
+                    category = getRuleCategoryLabel(id),
+                    isCustom = false,
+                    globalSerial = globalCounter++
+                )
+            )
+        }
+
+        // 2. U001 to U103 (Up Directional Matrix Rules)
+        for (i in 1..103) {
+            val id = "U%03d".format(i)
+            val title = SYSTEM_DIRECTIONAL_TITLES[id] ?: "EXTENDED_UP_VECTOR_$id"
+            result.add(
+                MatrixRuleVerificationItem(
+                    serial = i,
+                    id = id,
+                    defaultDirection = TradeDirection.UP,
+                    title = title,
+                    category = getRuleCategoryLabel(id),
+                    isCustom = false,
+                    globalSerial = globalCounter++
+                )
+            )
+        }
+
+        // 3. M001 to M165 (Quantitative Confluence Matrices)
+        MatrixCatalog.allMatrices.forEachIndexed { idx, m ->
+            result.add(
+                MatrixRuleVerificationItem(
+                    serial = idx + 1,
+                    id = m.id,
+                    defaultDirection = m.direction,
+                    title = m.outputCode.ifBlank { m.title },
+                    category = m.category,
+                    isCustom = false,
+                    globalSerial = globalCounter++
+                )
+            )
+        }
+
+        // 4. Custom Rules (Added by User in Tab 2 New Rule) - Always placed at the bottom with latest serial number!
+        val customList = getCustomRules()
+        customList.forEachIndexed { idx, cr ->
+            val mMatch = Regex("^M(\\d+)$").find(cr.id.uppercase())
+            val customMatrixSerial = if (mMatch != null) {
+                mMatch.groupValues[1].toIntOrNull() ?: (165 + idx + 1)
+            } else {
+                idx + 1
+            }
+            result.add(
+                MatrixRuleVerificationItem(
+                    serial = customMatrixSerial,
+                    id = cr.id,
+                    defaultDirection = cr.direction,
+                    title = cr.title.ifBlank { "Custom Rule ${cr.id}" },
+                    category = "User Custom Strategy",
+                    isCustom = true,
+                    globalSerial = globalCounter++
+                )
+            )
+        }
+
+        return result
     }
 
     /**

@@ -49,6 +49,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -181,7 +182,7 @@ fun TradingDashboardSection(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val isWsConnected by com.example.network.WebSocketTradeRelay.connectionState.collectAsState()
-    val tabs = listOf("Live Price Momentum", "100% Auto-Trade")
+    val tabs = listOf("Live Price Momentum", "100% Auto-Trade", "Money Management")
 
     Column(
         modifier = modifier
@@ -230,6 +231,14 @@ fun TradingDashboardSection(
                                         )
                                 )
                             }
+                            if (index == 2) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = "Money Management",
+                                    tint = if (selectedTab == index) NeonGreen else TextMuted,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
                             Text(
                                 text = title,
                                 fontSize = 11.sp,
@@ -266,6 +275,7 @@ fun TradingDashboardSection(
                     onToggleAutoTrade = onToggleAutoTrade,
                     onResetTradeLock = onResetTradeLock
                 )
+                2 -> MoneyManagementTab()
             }
         }
     }

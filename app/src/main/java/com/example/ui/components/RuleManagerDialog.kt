@@ -14,8 +14,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -28,6 +33,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Upload
@@ -55,8 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -147,6 +155,23 @@ fun RuleManagerDialog(
     val currentVerifiedRules = remember(refreshTick) { UserRuleRegistry.getVerifiedRuleIds() }
     val currentBackupJson = remember(refreshTick) { UserRuleRegistry.exportBackupJson() }
 
+    val hapticFeedback = LocalHapticFeedback.current
+    var verificationFilterCategory by remember { mutableStateOf("All") }
+    var verificationSearchQuery by remember { mutableStateOf("") }
+    var verificationStatusMessage by remember { mutableStateOf<String?>(null) }
+
+    val allVerificationRules = remember(refreshTick) {
+        UserRuleRegistry.getAllMatrixRulesForVerification()
+    }
+
+    var draftVerifiedMap by remember(refreshTick) {
+        val initial = mutableMapOf<String, Boolean>()
+        allVerificationRules.forEach { rule ->
+            initial[rule.id] = UserRuleRegistry.isRuleVerified(rule.id)
+        }
+        mutableStateOf(initial)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -212,7 +237,7 @@ fun RuleManagerDialog(
                     ) {
                         Text(
                             text = "1. Edit (${currentOverrides.size})",
-                            fontSize = 10.sp,
+                            fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (selectedTab == 0) DarkBackground else TextPrimary,
                             textAlign = TextAlign.Center,
@@ -229,7 +254,7 @@ fun RuleManagerDialog(
                     ) {
                         Text(
                             text = "2. New (${currentCustomRules.size})",
-                            fontSize = 10.sp,
+                            fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (selectedTab == 1) DarkBackground else TextPrimary,
                             textAlign = TextAlign.Center,
@@ -246,9 +271,26 @@ fun RuleManagerDialog(
                     ) {
                         Text(
                             text = "3. Backup 💾",
-                            fontSize = 10.sp,
+                            fontSize = 8.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (selectedTab == 2) DarkBackground else TextPrimary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 7.dp)
+                        )
+                    }
+
+                    Surface(
+                        onClick = { selectedTab = 3 },
+                        modifier = Modifier.weight(1.15f),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (selectedTab == 3) NeonGreen else DarkSurfaceVariant,
+                        border = BorderStroke(1.dp, if (selectedTab == 3) NeonGreen else BorderStrokeLight)
+                    ) {
+                        Text(
+                            text = "4. Verify Matrix ✓",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selectedTab == 3) DarkBackground else NeonGreen,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(vertical = 7.dp)
                         )
@@ -324,37 +366,24 @@ fun RuleManagerDialog(
                             refreshTick.let { }
                             UserRuleRegistry.isRuleVerified(cleanId)
                         } else false
-                        val ruleCat = UserRuleRegistry.getRuleCategoryLabel(cleanId)
 
-                        // Power Tier Badge
+                        // Auto-Trade Active Status Box
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = when {
-                                ruleCat.contains("MEGA") -> NeonGreenDim
-                                ruleCat.contains("ULTRA") -> NeonGreenDim
-                                ruleCat.contains("HIGH") -> NeonGreenDim
-                                ruleCat.contains("STRONG") -> AccentCyan.copy(alpha = 0.15f)
-                                else -> DarkSurfaceVariant
-                            },
-                            border = BorderStroke(1.dp, if (isCurrentRuleVerified) NeonGreenLight else BorderStrokeLight),
+                            color = DarkSurfaceVariant,
+                            border = BorderStroke(1.dp, if (isCurrentRuleVerified) NeonGreen.copy(alpha = 0.6f) else BorderStrokeLight),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "পাওয়ার: $ruleCat",
-                                    fontSize = 10.sp,
+                                    text = "✓ অটো ট্রেড এক্টিভ",
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (ruleCat.contains("CLIMAX") || ruleCat.contains("MOMENTUM")) NeonGreenLight else TextPrimary
-                                )
-                                Text(
-                                    text = if (isCurrentRuleVerified) "✓ অটো-ট্রেড সক্রিয়" else "টিক দিন (অটো ট্রেড চালু করতে)",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isCurrentRuleVerified) NeonGreenLight else TextMuted
+                                    color = NeonGreenLight
                                 )
                             }
                         }
@@ -628,6 +657,13 @@ fun RuleManagerDialog(
                                         customMin60m = String.format(Locale.US, "%.2f", v60 - 0.05)
                                         customMax60m = String.format(Locale.US, "%.2f", v60 + 0.05)
                                         customDirection = if (v5 >= 0) TradeDirection.UP else TradeDirection.DOWN
+                                        if (customRuleId.isBlank() || customRuleId.startsWith("C001")) {
+                                            val nextMatrixNum = 165 + currentCustomRules.count { it.id.startsWith("M") } + 1
+                                            customRuleId = "M%03d".format(nextMatrixNum)
+                                        }
+                                        if (customRuleTitle.isBlank()) {
+                                            customRuleTitle = "Matrix Range ${customRuleId.ifBlank { "M" }}"
+                                        }
                                     },
                                     shape = RoundedCornerShape(6.dp),
                                     color = DarkSurfaceVariant,
@@ -811,12 +847,20 @@ fun RuleManagerDialog(
                                         val low60 = minOf(min60, max60)
                                         val high60 = maxOf(min60, max60)
                                         val targetId = UserRuleRegistry.canonicalizeRuleId(
-                                            if (customRuleId.isBlank()) UserRuleRegistry.getNextCustomRuleId() else customRuleId
-                                        ).let { if (it.isBlank()) UserRuleRegistry.getNextCustomRuleId() else it }
+                                            if (customRuleId.isBlank()) {
+                                                val nextMatrixNum = 165 + currentCustomRules.count { it.id.startsWith("M") } + 1
+                                                "M%03d".format(nextMatrixNum)
+                                            } else customRuleId
+                                        ).let {
+                                            if (it.isBlank()) {
+                                                val nextMatrixNum = 165 + currentCustomRules.count { r -> r.id.startsWith("M") } + 1
+                                                "M%03d".format(nextMatrixNum)
+                                            } else it
+                                        }
 
                                         val newRule = CustomRule(
                                             id = targetId,
-                                            title = customRuleTitle.ifBlank { "Custom Rule $targetId" },
+                                            title = customRuleTitle.ifBlank { "Custom Matrix $targetId" },
                                             min5m = low5,
                                             max5m = high5,
                                             min60m = low60,
@@ -826,10 +870,11 @@ fun RuleManagerDialog(
                                         )
                                         UserRuleRegistry.addOrUpdateCustomRule(newRule)
                                         UserRuleRegistry.setRuleVerified(newRule.id, true)
-                                        customRuleId = UserRuleRegistry.getNextCustomRuleId()
+                                        val nextMatrixNum = 165 + currentCustomRules.count { it.id.startsWith("M") } + 2
+                                        customRuleId = "M%03d".format(nextMatrixNum)
                                         customRuleTitle = ""
                                         refreshTick++
-                                        customStatusMessage = "✅ Custom rule ${newRule.id} saved, activated & verified (✓)!"
+                                        customStatusMessage = "✅ ম্যাট্রিক্স ${newRule.id} সফলভাবে সেভ ও অ্যাক্টিভ করা হয়েছে! Verify Matrix সেকশনের নিচে সর্বশেষ সিরিয়াল নাম্বার হিসেবে যুক্ত হয়েছে।"
                                     } else {
                                         customStatusMessage = "⚠️ Please enter valid percentage numbers (e.g. 0.10, -0.20)."
                                     }
@@ -913,12 +958,44 @@ fun RuleManagerDialog(
                         }
 
                         if (customStatusMessage != null) {
-                            Text(
-                                text = customStatusMessage ?: "",
-                                fontSize = 11.sp,
-                                color = NeonGreenLight,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = customStatusMessage ?: "",
+                                    fontSize = 11.sp,
+                                    color = NeonGreenLight,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Surface(
+                                    onClick = {
+                                        selectedTab = 3 // Switch directly to Tab 4 (Verify Matrix)
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = DarkSurfaceVariant,
+                                    border = BorderStroke(0.8.dp, NeonGreen)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Go to Verify Matrix",
+                                            tint = NeonGreen,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = "👉 Verify Matrix তালিকায় নিচে দেখুন (Go to Verify Matrix)",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NeonGreen
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         // Saved Custom Rules List
@@ -1478,6 +1555,468 @@ fun RuleManagerDialog(
                                         fontSize = 11.sp,
                                         color = TextSecondary,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // TAB 4: RULE VERIFICATION MATRIX LIST
+                if (selectedTab == 3) {
+                    val filteredRules = remember(allVerificationRules, verificationFilterCategory, verificationSearchQuery) {
+                        allVerificationRules.filter { item ->
+                            val matchesCategory = when (verificationFilterCategory) {
+                                "D-Rules" -> item.id.startsWith("D")
+                                "U-Rules" -> item.id.startsWith("U")
+                                "M-Matrix" -> item.id.startsWith("M")
+                                "Custom" -> item.isCustom || item.id.startsWith("C")
+                                else -> true // "All"
+                            }
+                            val query = verificationSearchQuery.trim().uppercase()
+                            val matchesQuery = query.isEmpty() ||
+                                item.id.uppercase().contains(query) ||
+                                item.serial.toString() == query ||
+                                item.title.uppercase().contains(query) ||
+                                item.category.uppercase().contains(query)
+                            matchesCategory && matchesQuery
+                        }
+                    }
+
+                    val totalVerifiedCount = allVerificationRules.count { draftVerifiedMap[it.id] == true }
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Header & Description Card
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = DarkCard,
+                            border = BorderStroke(0.5.dp, BorderStrokeLight),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Verify",
+                                        tint = NeonGreen,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "ম্যাট্রিক্স রুল ভেরিফিকেশন প্যানেল (Rule Verification Matrix)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                                Text(
+                                    text = "১ থেকে শুরু করে সব ম্যাট্রিক্স সাজানো রয়েছে। টিকচিহ্ন [✓] যুক্ত রুলগুলো ১০০% ভেরিফাইড এবং ক্যামেরা ডিটেকশনে সাথে সাথে অটো-ট্রেড ফায়ার করবে।",
+                                    fontSize = 9.sp,
+                                    color = TextSecondary,
+                                    lineHeight = 12.sp
+                                )
+                            }
+                        }
+
+                        // Category Filter Chips
+                        val categories = listOf(
+                            "All" to "All (${allVerificationRules.size})",
+                            "M-Matrix" to "M-Matrix (${allVerificationRules.count { it.id.startsWith("M") }})",
+                            "D-Rules" to "D001-D165 (ডাউন)",
+                            "U-Rules" to "U001-U103 (আপ)",
+                            "Custom" to "Custom (${currentCustomRules.size})"
+                        )
+                        val chipScrollState = rememberScrollState()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(chipScrollState),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            categories.forEach { (key, label) ->
+                                val isSelected = verificationFilterCategory == key
+                                Surface(
+                                    onClick = { verificationFilterCategory = key },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = if (isSelected) NeonGreen.copy(alpha = 0.2f) else DarkSurfaceVariant,
+                                    border = BorderStroke(
+                                        width = if (isSelected) 1.dp else 0.5.dp,
+                                        color = if (isSelected) NeonGreen else BorderStrokeLight
+                                    )
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 9.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) NeonGreen else TextSecondary,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Search Bar
+                        OutlinedTextField(
+                            value = verificationSearchQuery,
+                            onValueChange = { verificationSearchQuery = it },
+                            placeholder = { Text("রুল নং বা নাম সার্চ করুন (যেমন: D001, M042, 15)...", fontSize = 10.sp, color = TextMuted) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (verificationSearchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { verificationSearchQuery = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear search",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentCyan,
+                                unfocusedBorderColor = BorderStrokeLight,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedContainerColor = DarkSurfaceVariant,
+                                unfocusedContainerColor = DarkSurfaceVariant
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                        )
+
+                        // Action Controls Bar: Select All, Deselect All, and Live Counter
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // Select All Button
+                                Surface(
+                                    onClick = {
+                                        val updated = draftVerifiedMap.toMutableMap()
+                                        filteredRules.forEach { updated[it.id] = true }
+                                        draftVerifiedMap = updated
+                                        verificationStatusMessage = "বর্তমান ফিল্টারের সব রুল সিলেক্ট করা হয়েছে [✓]"
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = DarkSurfaceVariant,
+                                    border = BorderStroke(0.5.dp, NeonGreen.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Select All",
+                                            tint = NeonGreen,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "Select All (সব সিলেক্ট)",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NeonGreen
+                                        )
+                                    }
+                                }
+
+                                // Deselect All Button
+                                Surface(
+                                    onClick = {
+                                        val updated = draftVerifiedMap.toMutableMap()
+                                        filteredRules.forEach { updated[it.id] = false }
+                                        draftVerifiedMap = updated
+                                        verificationStatusMessage = "বর্তমান ফিল্টারের সব রুল থেকে টিক সরানো হয়েছে"
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = DarkSurfaceVariant,
+                                    border = BorderStroke(0.5.dp, NeonRed.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Deselect All",
+                                            tint = NeonRed,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "Deselect All (সব মুছুন)",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NeonRed
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Live Counter Badge
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = NeonGreen.copy(alpha = 0.15f),
+                                border = BorderStroke(0.5.dp, NeonGreen.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "Verified: $totalVerifiedCount",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonGreen,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.5.dp)
+                                )
+                            }
+                        }
+
+                        // Scrollable Rules List
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 340.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            itemsIndexed(
+                                items = filteredRules,
+                                key = { _, item -> item.id }
+                            ) { _, rule ->
+                                val effDir = currentOverrides[rule.id] ?: rule.defaultDirection
+                                val isOverridden = currentOverrides.containsKey(rule.id)
+                                val isChecked = draftVerifiedMap[rule.id] == true
+
+                                Surface(
+                                    onClick = {
+                                        val updated = draftVerifiedMap.toMutableMap()
+                                        updated[rule.id] = !isChecked
+                                        draftVerifiedMap = updated
+                                        verificationStatusMessage = null
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isChecked) DarkSurfaceVariant else DarkCard,
+                                    border = BorderStroke(
+                                        width = if (isChecked) 0.8.dp else 0.5.dp,
+                                        color = if (isChecked) NeonGreen.copy(alpha = 0.6f) else BorderStrokeLight
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        // Left Side: Serial Number, Rule ID, Direction, and Title
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            // Serial Number pill [1], [2], ...
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = DarkBackground,
+                                                border = BorderStroke(0.5.dp, BorderStrokeLight)
+                                            ) {
+                                                Text(
+                                                    text = if (verificationFilterCategory == "All") "[#${rule.globalSerial}]" else "[${rule.serial}]",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = AccentAmber,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+
+                                            // Rule ID
+                                            Text(
+                                                text = rule.id,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color.White
+                                            )
+
+                                            // Direction Badge (Shows effective direction with override applied!)
+                                            val badgeColor = when (effDir) {
+                                                TradeDirection.UP -> NeonGreen
+                                                TradeDirection.DOWN -> NeonRed
+                                                else -> TextMuted
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(3.dp),
+                                                color = badgeColor.copy(alpha = 0.2f),
+                                                border = BorderStroke(0.5.dp, badgeColor.copy(alpha = 0.6f))
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
+                                                ) {
+                                                    Text(
+                                                        text = effDir.name,
+                                                        fontSize = 8.5.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = badgeColor
+                                                    )
+                                                    if (isOverridden) {
+                                                        Text(
+                                                            text = "*",
+                                                            fontSize = 8.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = AccentCyan
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            // Rule Output Title
+                                            Text(
+                                                text = rule.title.replace("_", " "),
+                                                fontSize = 9.sp,
+                                                color = TextSecondary,
+                                                maxLines = 1,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                        }
+
+                                        // Right Side: Checkbox / Checkmark Toggle
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (isChecked) NeonGreen else DarkBackground,
+                                            border = BorderStroke(
+                                                width = 1.dp,
+                                                color = if (isChecked) NeonGreen else BorderStrokeLight
+                                            ),
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                if (isChecked) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Verified",
+                                                        tint = DarkBackground,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Status feedback message
+                        if (verificationStatusMessage != null) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = DarkCard,
+                                border = BorderStroke(0.5.dp, NeonGreen.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = verificationStatusMessage ?: "",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonGreen,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(6.dp)
+                                )
+                            }
+                        }
+
+                        // Bottom Action Controls: Save Verification & Cancel
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Cancel Button
+                            Surface(
+                                onClick = {
+                                    val reset = mutableMapOf<String, Boolean>()
+                                    allVerificationRules.forEach { r ->
+                                        reset[r.id] = UserRuleRegistry.isRuleVerified(r.id)
+                                    }
+                                    draftVerifiedMap = reset
+                                    verificationStatusMessage = "সকল পরিবর্তন বাতিল করা হয়েছে।"
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                color = DarkSurfaceVariant,
+                                border = BorderStroke(1.dp, BorderStrokeLight)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Cancel",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Cancel (বাতিল)",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            // Save Verification Button
+                            Surface(
+                                onClick = {
+                                    UserRuleRegistry.setRulesBatchVerified(draftVerifiedMap)
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    refreshTick++
+                                    val savedCount = allVerificationRules.count { draftVerifiedMap[it.id] == true }
+                                    verificationStatusMessage = "✅ সমস্ত ভেরিফিকেশন সফলভাবে সেভ হয়েছে! ($savedCount টি রুলস ভেরিফাইড ✓)"
+                                },
+                                modifier = Modifier.weight(1.4f),
+                                shape = RoundedCornerShape(8.dp),
+                                color = NeonGreen
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Save",
+                                        tint = DarkBackground,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Save Verification (সংরক্ষণ)",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = DarkBackground
                                     )
                                 }
                             }
