@@ -49,12 +49,19 @@ val STANDARD_7_STEPS = listOf(
 fun MoneyManagementTab(
     modifier: Modifier = Modifier
 ) {
-    var capitalInput by remember { mutableStateOf("210") }
+    var capitalInput by remember { mutableStateOf("") }
+    var percentageInput by remember { mutableStateOf("") }
     var currentStepIndex by remember { mutableIntStateOf(0) } // 0 = Step 1, 6 = Step 7
     var sessionWinCount by remember { mutableIntStateOf(0) }
     var statusFeedback by remember { mutableStateOf<String?>(null) }
 
-    val userCapital = capitalInput.toDoubleOrNull() ?: 210.0
+    val userCapital = capitalInput.toDoubleOrNull() ?: 0.0
+    val userPercent = percentageInput.toDoubleOrNull() ?: 0.0
+    val dailyTarget = if (userCapital > 0.0 && userPercent > 0.0) {
+        (userCapital * userPercent) / 100.0
+    } else {
+        0.0
+    }
     val activeStep = STANDARD_7_STEPS[currentStepIndex]
 
     LazyColumn(
@@ -100,7 +107,7 @@ fun MoneyManagementTab(
             }
         }
 
-        // 2. Capital Input & Quick Presets
+        // 2. Capital & Percentage Dual Inputs
         item {
             Surface(
                 shape = RoundedCornerShape(10.dp),
@@ -124,12 +131,31 @@ fun MoneyManagementTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // 1st Box: Balance Input ($)
                         OutlinedTextField(
                             value = capitalInput,
-                            onValueChange = { capitalInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
-                            label = { Text("ব্যালেন্স ($)", fontSize = 10.sp) },
-                            prefix = { Text("$", color = NeonGreen, fontWeight = FontWeight.Bold) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            onValueChange = { input ->
+                                capitalInput = input.filter { ch -> ch.isDigit() || ch == '.' }
+                            },
+                            label = { Text("ব্যালেন্স", fontSize = 10.sp) },
+                            prefix = { Text("$ ", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                            placeholder = { Text("0", fontSize = 11.sp, color = TextMuted) },
+                            trailingIcon = if (capitalInput.isNotEmpty()) {
+                                {
+                                    IconButton(
+                                        onClick = { capitalInput = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear Balance",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            } else null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
@@ -137,69 +163,82 @@ fun MoneyManagementTab(
                                 focusedBorderColor = NeonGreen,
                                 unfocusedBorderColor = DarkSurfaceVariant,
                                 focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                unfocusedTextColor = Color.White,
+                                cursorColor = NeonGreen
                             )
                         )
 
-                        // Reset button
-                        Surface(
-                            onClick = {
-                                capitalInput = "210"
-                                currentStepIndex = 0
-                                statusFeedback = "মূলধন $210 এ রিসেট করা হয়েছে।"
+                        // 2nd Box: Percentage Input (%)
+                        OutlinedTextField(
+                            value = percentageInput,
+                            onValueChange = { input ->
+                                percentageInput = input.filter { ch -> ch.isDigit() || ch == '.' }
                             },
+                            label = { Text("পার্সেন্টেজ", fontSize = 10.sp) },
+                            prefix = { Text("% ", color = AccentCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                            placeholder = { Text("0", fontSize = 11.sp, color = TextMuted) },
+                            trailingIcon = if (percentageInput.isNotEmpty()) {
+                                {
+                                    IconButton(
+                                        onClick = { percentageInput = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear Percentage",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            } else null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp),
-                            color = DarkSurfaceVariant,
-                            border = BorderStroke(1.dp, BorderStrokeLight)
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentCyan,
+                                unfocusedBorderColor = DarkSurfaceVariant,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = AccentCyan
+                            )
+                        )
+                    }
+
+                    if (userCapital > 0.0 && userPercent > 0.0) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = NeonGreen.copy(alpha = 0.1f),
+                            border = BorderStroke(0.6.dp, NeonGreen.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Reset",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text("রিসেট", fontSize = 11.sp, color = TextSecondary)
-                            }
-                        }
-                    }
-
-                    // Quick Presets
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf("100", "210", "500", "1000").forEach { preset ->
-                            val isSelected = capitalInput == preset
-                            Surface(
-                                onClick = { capitalInput = preset },
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isSelected) NeonGreen.copy(alpha = 0.2f) else DarkSurfaceVariant,
-                                border = BorderStroke(0.8.dp, if (isSelected) NeonGreen else BorderStrokeLight),
-                                modifier = Modifier.weight(1f)
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "$$preset",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) NeonGreen else TextSecondary,
-                                    modifier = Modifier
-                                        .padding(vertical = 5.dp)
-                                        .wrapContentWidth(Alignment.CenterHorizontally)
+                                    text = "স্বয়ংক্রিয় দৈনিক টার্গেট (${String.format(Locale.US, "%.1f", userPercent)}%):",
+                                    fontSize = 10.sp,
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = "+$${String.format(Locale.US, "%.2f", dailyTarget)} / দিন",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = NeonGreen
                                 )
                             }
                         }
+                    } else {
+                        Text(
+                            text = "💡 ব্যালেন্স ($) এবং পার্সেন্টেজ (%) বক্সে সংখ্যা বসালে স্বয়ংক্রিয়ভাবে দৈনিক টার্গেট ও ৩০ দিনের হিসাব তৈরি হবে।",
+                            fontSize = 9.5.sp,
+                            color = AccentAmber
+                        )
                     }
-
-                    Text(
-                        text = "💡 টিপস: পুরো ৭টি ধাপের নিরাপদ ব্যাকআপের জন্য অন্তত $২০৯ ডলার ক্যাপিটাল থাকা নিরাপদ।",
-                        fontSize = 9.5.sp,
-                        color = AccentAmber
-                    )
                 }
             }
         }
@@ -491,15 +530,18 @@ fun MoneyManagementTab(
                             )
                         }
                         Text(
-                            text = "দৈনিক টার্গেট: ~$২ লাভ",
+                            text = if (userCapital > 0.0 && userPercent > 0.0) {
+                                "দৈনিক টার্গেট: $${String.format(Locale.US, "%.2f", dailyTarget)} (${String.format(Locale.US, "%.1f", userPercent)}%)"
+                            } else {
+                                "দৈনিক টার্গেট: $0.00"
+                            },
                             fontSize = 9.5.sp,
-                            color = AccentAmber,
+                            color = if (dailyTarget > 0.0) NeonGreen else AccentAmber,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
                     // 30 Days Summary Cards
-                    val dailyTarget = 2.0
                     val finalProjectedBalance = userCapital + (30 * dailyTarget)
                     val totalProfit = 30 * dailyTarget
                     val roiPercent = if (userCapital > 0) (totalProfit / userCapital) * 100.0 else 0.0
@@ -521,7 +563,7 @@ fun MoneyManagementTab(
                             ) {
                                 Text("শুরুর ক্যাপিটাল", fontSize = 8.5.sp, color = TextMuted)
                                 Text(
-                                    text = "$${String.format(Locale.US, "%.0f", userCapital)}",
+                                    text = "$${String.format(Locale.US, "%.2f", userCapital)}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -563,7 +605,7 @@ fun MoneyManagementTab(
                             ) {
                                 Text("মোট আনুমানিক লাভ", fontSize = 8.5.sp, color = TextMuted)
                                 Text(
-                                    text = "+$${String.format(Locale.US, "%.0f", totalProfit)}",
+                                    text = "+$${String.format(Locale.US, "%.2f", totalProfit)}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AccentCyan
@@ -625,20 +667,20 @@ fun MoneyManagementTab(
                                         }
                                     )
                                     Text(
-                                        text = "শুরু: $${String.format(Locale.US, "%.1f", startBal)}",
+                                        text = "শুরু: $${String.format(Locale.US, "%.2f", startBal)}",
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace,
                                         color = TextMuted
                                     )
                                     Text(
-                                        text = "প্রফিট: +$$dailyTarget",
+                                        text = "প্রফিট: +$${String.format(Locale.US, "%.2f", dailyTarget)}",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         fontFamily = FontFamily.Monospace,
                                         color = NeonGreenLight
                                     )
                                     Text(
-                                        text = "দিন শেষে: $${String.format(Locale.US, "%.1f", endBal)}",
+                                        text = "দিন শেষে: $${String.format(Locale.US, "%.2f", endBal)}",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
