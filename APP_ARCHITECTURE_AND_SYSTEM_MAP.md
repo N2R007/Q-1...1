@@ -213,10 +213,14 @@ Located in `AutoTradeBridge.kt` and `WebSocketTradeRelay.kt`:
   1. **Mode 1 (USB Cable / ADB Reverse)**: Automatically probes `ws://127.0.0.1:8765` first (with ultra-low latency). Requires zero router setup.
   2. **Mode 2 (Wi-Fi Local Network)**: Automatically resolves the connected Wi-Fi gateway (e.g. `192.168.0.x` / `192.168.1.x`) and defaults to port 8765.
   3. **Mode 3 (Mobile Hotspot / SIM Cellular)**: Automatically detects hotspot subnet gateway (`192.168.43.1` or interface `rndis0`/`ap0`) to communicate directly with the connected laptop.
-- **Instant Auto-Trade Dispatch on Verified (✓) Match (User Mandate)**:
-  - Whenever a detected matrix rule (e.g. `D080`, `M001`-`M165`, or custom) displays the verified checkmark (`✓`) in the metric chip, auto-trade dispatches immediately to the WebSocket broker relay with 0ms latency.
-  - Eliminated redundant background re-evaluation mismatch blocks so that the active signal on screen directly triggers the dispatch.
-  - Toggling verification directly from the dashboard immediately dispatches the active signal without waiting for subsequent changes.
+- **Unified Verification Control System & Instant Auto-Trade Gating (User Mandate)**:
+  - **Absolute Single Source of Truth (`UserRuleRegistry`)**: Auto-trade execution is strictly gated by rule verification status. Only rules that have their verification checkmark (`✓`) active will execute auto-trades.
+  - **Deselect All / Delete All Master Shutdown**: If the user deselects all rules or clicks "Delete All (সব মুছুন [০])" in the "Verify Matrix ✓" panel and saves, all verification checkmarks are removed across the entire app. When saved with zero verified rules, auto-trade is 100% disabled across all matrix numbers.
+  - **Granular Selective Activation**: When the user subsequently places checkmarks on specific rules of choice and saves, auto-trading activates exclusively for those selected rules.
+  - **Two-Way Synchronized Control**:
+    1. **Dashboard Verify Button**: One-tap toggle directly on the live dashboard. Clicking toggles verification state (Verify <-> Verified ✓) and automatically persists to SharedPreferences instantly with zero extra clicks. If active on screen, trade dispatches immediately.
+    2. **Verify Matrix Tab (RuleManagerDialog Tab 4)**: Provides complete batch management ("Select All", "Deselect", "Delete All", individual checkboxes) with persistent Save Verification button.
+    3. **Rule Edit & Overrides (RuleManagerDialog Tab 1)**: Interactive status toggle (`✓ অটো ট্রেড এক্টিভ` <-> `✕ আন-ভেরিফাইড`) and dedicated Verify button synchronized with the registry.
 - **Immediate Polarity-Based Trade Dispatch**:
   - Direct hook into OCR and Color momentum: `sendTradeSignal(polarity: Int)`
   - `polarity = 1` -> `BUY` / `CLICK_BUY`
@@ -473,10 +477,17 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
     - Prevents artificial incrementation of `isNewChangeTrigger`, ensuring that trades only fire when a genuine *new* price momentum reading arrives from the camera after the user has returned to live scanning.
   - **Robust Backup Import/Export**: Supports complete backup/restore of custom rules, overrides, and verification sets with JSON validation, direct array support, and detailed import feedback.
   - **4-Tab Rule Manager Architecture (`RuleManagerDialog.kt`)**:
-    - **Tab 1 ("1. Overrides" / Edit)**: Allows overriding directions for any built-in system rule (D001-D165, U001-U103, M001-M165) with single-tap verify toggle. Features a clean, minimal status box below the Rule ID input containing exclusively `✓ অটো ট্রেড এক্টিভ` with redundant power labels completely removed.
+    - **Tab 1 ("1. Overrides" / Edit)**: Allows overriding directions for any built-in system rule (D001-D165, U001-U103, M001-M165) with single-tap verify toggle. Features an interactive, clickable status box below the Rule ID input displaying `✓ অটো ট্রেড এক্টিভ (Verified)` when active or `✕ আন-ভেরিফাইড (অটো ট্রেড বন্ধ)` when inactive, directly toggling verification and auto-saving.
     - **Tab 2 ("2. New")**: Dedicated custom rule creation with "⚡ Auto-Fill Range" that grabs live 5M/60M percentage bounds and automatically suggests the next sequential Matrix ID (e.g. `M166`). Saving or activating automatically marks the rule verified (`✓`) and appends it to the bottom of the Verify Matrix section. Includes a direct "👉 Go to Verify Matrix" navigation button.
-    - **Tab 3 ("3. Backup")**: One-tap JSON export/import and clipboard synchronization.
-    - **Tab 4 ("4. Verify Matrix ✓")**: Complete matrix rule verification table displaying all 433+ rules (D-Rules, U-Rules, M-Matrix, and User Custom Strategies) with sequential serial numbers (`[#1]` to `[#434+]` in All view, or category-relative serials `[1]` to `[165+]`). When new rules are saved in Tab 2, they automatically append at the very bottom with the latest serial number and pre-checked `✓` status. Features category filter chips ("All", "M-Matrix", "D-Rules", "U-Rules", "Custom"), real-time search by ID/Title/Number, batch "Select All (সব সিলেক্ট)" / "Deselect All (সব মুছুন)" controls, and a persistent live verified counter (`Verified: X`).
+    - **Tab 3 ("3. Verify Matrix ✓")**: Structured, high-density tabular rule verification console displaying all 433+ rules (D-Rules, U-Rules, M-Matrix, and User Custom Strategies) maximized for screen space:
+      - **Top Search Bar with Single Integrated Save Button (`💾 সেভ`)**: Search bar positioned at the absolute top with the primary instant Save button docked directly to its right. Eliminates duplicate save bars and maximizes vertical screen real estate for viewing more matrix items.
+      - **Filter Chips**: Horizontal scrolling category chips (`সব`, `M-Matrix`, `D-Rules`, `U-Rules`, `কাস্টম`).
+      - **Streamlined 3-Item Quick Action Bar**: Balanced control grid with `সব সিলেক্ট`, `সব মুছুন / ফিল্টার অফ`, and the dynamic **Live Counter Status Badge** (`✓ X টি সক্রিয়` / `⚠️ ০ টি বন্ধ`), directly replacing the redundant Delete All button.
+      - **Tabular Table Column Header**: Clean column guides (`#` | `রুল নং` | `ডিরেকশন` | `বিবরণ (Matrix Title)` | `টিক [✓]`).
+      - **Monospace Tabular Alignment**: Fixed-width serial pills (`#1`), bold monospace rule IDs (`D001`), crisp direction badges (`UP`/`DOWN` with override indicator `*`), single-line truncated titles with ellipsis, and high-contrast 22x22dp checkboxes. Checked rows illuminate with subtle emerald tint for instant scanning.
+      - **Maximized Viewport (No Redundant Bottom Bar)**: With the bottom save and cancel buttons cleanly removed, the rule table dynamically occupies maximum vertical space (`Modifier.weight(1f)`), allowing users to view 3-4 additional matrix rows simultaneously without vertical crowding.
+      - **Master Gating & Permanent Persistence**: All checkmark states persist indefinitely in `SharedPreferences` (`quant_user_rule_registry_v1`). Removing all checkmarks and saving completely shuts down auto-trading across all matrix numbers (`⚠️ ০ টি বন্ধ`) until rules are individually re-selected and saved.
+    - **Tab 4 ("4. Backup 💾")**: One-tap JSON export/import and clipboard synchronization.
 
 ### 12.1 `DynamicDeltaMomentumEngine.kt` (স্বয়ংক্রিয় গাণিতিক ডেল্টা মোমেন্টাম ভেক্টর ইঞ্জিন)
 - **Mathematical Fallback & Out-of-Matrix Dynamic Decision System**:
@@ -522,7 +533,13 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
 - **High-Density 3-Tab Navigation**: Clean top navigation bar consisting of:
   1. `Live Price Momentum` (Main camera vision, quantitative grid, 3X/3X velocity indicator, pinned execution triggers, and live trade history cards).
   2. `100% Auto-Trade` (WebSocket relay and telemetry terminal).
-  3. `Money Management` (`MoneyManagementTab.kt`): Dedicated 7-step integer recovery matrix ($1, $2, $5, $11, $24, $52, $114 for 95% broker payout), dual empty input boxes for Capital Balance (`$`) and Target Percentage (`%`) without default numbers for clean manual entry with single-tap quick-clear controls, real-time dynamic auto-calculation for daily target profit (`(Capital × %)/100`), interactive live next-trade step tracker with instant "Loss (Next Step)" / "Win (Reset $1)" simulation buttons, and dynamic 30-day projected compounding growth planner featuring an unconstrained Day 1 to Day 30 breakdown with real-time dynamic updates and milestone highlights (Day 05, Day 10, Day 15, Day 20, Day 25, Day 30). Zero interference with camera scanning or trade latency.
+  3. `Money Management` (`MoneyManagementTab.kt`): Advanced executive trading capital management interface featuring:
+     - **Maximized Vertical Space (Zero-Banner Design)**: Top introductory header banner permanently removed to minimize vertical scroll and maximize immediate screen visibility.
+     - **Streamlined English Title (`Capital & Target`) & 95% Payout Badge**: Clean header with broker payout indicator badge and safety cushion alerts.
+     - **Dual Inputs for Capital & Daily Target**: Manual entry input fields for Capital Balance (`$`) and Target Percentage (`%`) with single-tap quick-clear controls.
+     - **Dynamic Intelligence Banner**: Instant real-time calculation of daily target profit (`+$X.XX / দিন`) and capital cushion alerts (alerting when balance is under $209 for full 7-step cushion safety).
+     - **Smart Next-Trade Execution Card**: Interactive 7-node visual step progress track (`(1)──(2)──(3)...`), hero high-contrast monospace trade size display (`$1.00` to `$114.00`), live 95% payout & net profit breakdown, session win counter, and responsive "Loss (Next Step)" / "Win (Reset $1)" action buttons.
+     - **30-Day Growth & Earning Projection**: Executive metric cards for Starting Capital, 30-Day Projected Balance, and Net Profit (ROI %); paired with a view-mode toggle between concise "Milestone View" (Days 1, 5, 10, 15, 20, 25, 30) and "All 30 Days" full schedule. Zero interference with camera scanning or trade latency.
 - **Zero-White Border Styling (Pure Black Borders)**: All dashboard sections, cards, surfaces, and theme borders (`BorderColor`, `BorderLight`, `BorderStroke`, `BorderStrokeLight`) are configured strictly to pure black (`Color(0xFF000000)` / `Color.Black`), completely eliminating any white or light-grey outline frames across the application interface.
 - Houses the Floating Auto-Trade Dispatcher panel and Settings dialogs.
 - **Unobstructed View (Zero ERROR/ALERT Popups)**: The intrusive red ERROR/ALERT popup banner in `MainAnalysisTab` is permanently removed to ensure continuous uninterrupted scanning and zero-latency execution.
@@ -538,7 +555,8 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
   - **Real-Time Search**: Instant search filtering by Rule ID (e.g. `D001`, `M042`), serial number (`15`), or rule title keywords.
   - **Quick Action Controls**:
     - **Select All (সব সিলেক্ট)**: Instantly marks all visible rules in the filtered list as verified (`[✓]`).
-    - **Deselect All (সব মুছুন)**: Clears verification checkmarks from all visible rules in the filtered list.
+    - **Deselect (মুছুন)**: Clears verification checkmarks from visible rules in the active category.
+    - **Delete All (সব ০)**: Instantly unchecks ALL 433+ rules across the entire app with a single tap.
     - **Live Verification Counter**: Continuously updates `Verified: X` in a glowing emerald badge.
   - **Interactive Checkmark Matrix Row**:
     - Serial indicator (e.g. `[1]`, `[165]`) in monospace amber pill.
@@ -548,7 +566,7 @@ Implements real-time tick pressure analysis and immediate reversal confirmation 
     - Large 24x24dp toggle checkbox with high-contrast `✓` checkmark.
   - **Batch Persistence & Cancel Controls**:
     - **Cancel (বাতিল)**: Reverts all uncommitted changes back to current registry state.
-    - **Save Verification (সংরক্ষণ)**: Commits all verification states into `UserRuleRegistry` SharedPreferences (`quant_user_rule_registry_v1`) in a single optimized pass, provides tactile haptic feedback, and displays a confirmation toast. Verified rules (`[✓]`) fire auto-trades instantly upon screen recognition, while unverified rules are safely suppressed.
+    - **Save Verification (সংরক্ষণ)**: Commits all verification states into `UserRuleRegistry` SharedPreferences (`quant_user_rule_registry_v1`) in a single optimized pass, provides tactile haptic feedback, and displays a confirmation toast. Verified rules (`[✓]`) fire auto-trades instantly upon screen recognition, while unverified rules are safely suppressed. If saved with 0 verified rules, auto-trading is completely disabled for all matrix numbers.
 
 ---
 

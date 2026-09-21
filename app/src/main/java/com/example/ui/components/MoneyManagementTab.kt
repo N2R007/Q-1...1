@@ -2,25 +2,25 @@ package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
@@ -49,11 +49,12 @@ val STANDARD_7_STEPS = listOf(
 fun MoneyManagementTab(
     modifier: Modifier = Modifier
 ) {
-    var capitalInput by remember { mutableStateOf("") }
-    var percentageInput by remember { mutableStateOf("") }
+    var capitalInput by remember { mutableStateOf("100") }
+    var percentageInput by remember { mutableStateOf("5") }
     var currentStepIndex by remember { mutableIntStateOf(0) } // 0 = Step 1, 6 = Step 7
     var sessionWinCount by remember { mutableIntStateOf(0) }
     var statusFeedback by remember { mutableStateOf<String?>(null) }
+    var showAll30Days by remember { mutableStateOf(false) }
 
     val userCapital = capitalInput.toDoubleOrNull() ?: 0.0
     val userPercent = percentageInput.toDoubleOrNull() ?: 0.0
@@ -66,66 +67,84 @@ fun MoneyManagementTab(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 60.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 1. Header Card
+        // ==========================================
+        // 1. Capital & Daily Target Configuration Card
+        // ==========================================
         item {
             Surface(
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = DarkCard,
                 border = BorderStroke(1.dp, BorderStrokeLight),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountBalanceWallet,
-                            contentDescription = "Money Management",
-                            tint = NeonGreen,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Money Management & Recovery Matrix",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Config",
+                                tint = AccentCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Capital & Target",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Broker Payout Indicator Badge
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = AccentCyan.copy(alpha = 0.12f),
+                                border = BorderStroke(0.6.dp, AccentCyan.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "৯৫% পে-আউট",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentCyan,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+
+                            if (userCapital in 1.0..208.0) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = AccentAmber.copy(alpha = 0.15f),
+                                    border = BorderStroke(0.5.dp, AccentAmber.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "৭ম ধাপে $২০৯ কুশন প্রয়োজন",
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentAmber,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Text(
-                        text = "৭-ধাপ পূর্ণসংখ্যা রিকভারি কৌশল ও ৩০ দিনের প্রজেকশন প্ল্যান (৯৫% ব্রোকার পে-আউট)",
-                        fontSize = 10.sp,
-                        color = TextSecondary
-                    )
-                }
-            }
-        }
 
-        // 2. Capital & Percentage Dual Inputs
-        item {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = DarkCard,
-                border = BorderStroke(1.dp, BorderStrokeLight),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "১. আপনার মূলধন / ব্যালেন্স ইনপুট করুন:",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentCyan
-                    )
-
+                    // Input Text Fields Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -137,9 +156,9 @@ fun MoneyManagementTab(
                             onValueChange = { input ->
                                 capitalInput = input.filter { ch -> ch.isDigit() || ch == '.' }
                             },
-                            label = { Text("ব্যালেন্স", fontSize = 10.sp) },
+                            label = { Text("ব্যালেন্স / মূলধন", fontSize = 10.sp) },
                             prefix = { Text("$ ", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-                            placeholder = { Text("0", fontSize = 11.sp, color = TextMuted) },
+                            placeholder = { Text("100", fontSize = 11.sp, color = TextMuted) },
                             trailingIcon = if (capitalInput.isNotEmpty()) {
                                 {
                                     IconButton(
@@ -161,9 +180,11 @@ fun MoneyManagementTab(
                             shape = RoundedCornerShape(8.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonGreen,
-                                unfocusedBorderColor = DarkSurfaceVariant,
+                                unfocusedBorderColor = BorderStrokeLight,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
+                                focusedContainerColor = DarkSurfaceVariant,
+                                unfocusedContainerColor = DarkSurfaceVariant,
                                 cursorColor = NeonGreen
                             )
                         )
@@ -174,9 +195,9 @@ fun MoneyManagementTab(
                             onValueChange = { input ->
                                 percentageInput = input.filter { ch -> ch.isDigit() || ch == '.' }
                             },
-                            label = { Text("পার্সেন্টেজ", fontSize = 10.sp) },
+                            label = { Text("দৈনিক টার্গেট", fontSize = 10.sp) },
                             prefix = { Text("% ", color = AccentCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-                            placeholder = { Text("0", fontSize = 11.sp, color = TextMuted) },
+                            placeholder = { Text("5", fontSize = 11.sp, color = TextMuted) },
                             trailingIcon = if (percentageInput.isNotEmpty()) {
                                 {
                                     IconButton(
@@ -198,152 +219,279 @@ fun MoneyManagementTab(
                             shape = RoundedCornerShape(8.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = AccentCyan,
-                                unfocusedBorderColor = DarkSurfaceVariant,
+                                unfocusedBorderColor = BorderStrokeLight,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
+                                focusedContainerColor = DarkSurfaceVariant,
+                                unfocusedContainerColor = DarkSurfaceVariant,
                                 cursorColor = AccentCyan
                             )
                         )
                     }
 
+                    // Dynamic Daily Target Highlight Banner
                     if (userCapital > 0.0 && userPercent > 0.0) {
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = NeonGreen.copy(alpha = 0.1f),
-                            border = BorderStroke(0.6.dp, NeonGreen.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(8.dp),
+                            color = NeonGreenDim,
+                            border = BorderStroke(0.8.dp, NeonGreen.copy(alpha = 0.5f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    Text(
+                                        text = "দৈনিক লক্ষ্যমাত্রা অর্জন (${String.format(Locale.US, "%.1f", userPercent)}%):",
+                                        fontSize = 10.sp,
+                                        color = TextSecondary
+                                    )
+                                    Text(
+                                        text = "প্রতিদিন এই নিট লাভ অর্জিত হলেই ট্রেডিং সেশন বন্ধ রাখুন",
+                                        fontSize = 8.5.sp,
+                                        color = TextMuted
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = NeonGreen.copy(alpha = 0.2f)
+                                ) {
+                                    Text(
+                                        text = "+$${String.format(Locale.US, "%.2f", dailyTarget)} / দিন",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = NeonGreen,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 3. Smart Next-Trade Execution Card
+        // ==========================================
+        item {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = DarkCard,
+                border = BorderStroke(1.2.dp, if (activeStep.stepNumber == 1) NeonGreen.copy(alpha = 0.6f) else AccentAmber.copy(alpha = 0.8f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Card Top Bar with Step Dots & Reset
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TrendingUp,
+                                contentDescription = "Trade Size",
+                                tint = if (activeStep.stepNumber == 1) NeonGreen else AccentAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "২. পরবর্তী ট্রেড সাইজ অ্যাডভাইজর",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeStep.stepNumber == 1) NeonGreenLight else AccentAmber
+                            )
+                        }
+
+                        // Reset to Step 1 Button
+                        Surface(
+                            onClick = {
+                                currentStepIndex = 0
+                                statusFeedback = "ধাপ ১ এ রিসেট করা হয়েছে ($১ ট্রেড)"
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            color = DarkSurfaceVariant,
+                            border = BorderStroke(0.5.dp, BorderStrokeLight)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reset Step",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(11.dp)
+                                )
                                 Text(
-                                    text = "স্বয়ংক্রিয় দৈনিক টার্গেট (${String.format(Locale.US, "%.1f", userPercent)}%):",
+                                    text = "রিসেট $১",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    // 7-Step Visual Progress Track
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        STANDARD_7_STEPS.forEachIndexed { idx, step ->
+                            val isCurrent = idx == currentStepIndex
+                            val isPassed = idx < currentStepIndex
+                            Surface(
+                                onClick = {
+                                    currentStepIndex = idx
+                                    statusFeedback = "ম্যানুয়ালি ধাপ ${step.stepNumber} ($${step.tradeAmount}) নির্বাচন করা হয়েছে।"
+                                },
+                                shape = CircleShape,
+                                color = when {
+                                    isCurrent -> if (step.stepNumber == 1) NeonGreen else AccentAmber
+                                    isPassed -> NeonRed.copy(alpha = 0.35f)
+                                    else -> DarkSurfaceVariant
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    when {
+                                        isCurrent -> Color.White
+                                        isPassed -> NeonRedLight.copy(alpha = 0.6f)
+                                        else -> BorderStrokeLight
+                                    }
+                                ),
+                                modifier = Modifier.size(if (isCurrent) 28.dp else 24.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "${step.stepNumber}",
+                                        fontSize = if (isCurrent) 11.sp else 9.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = when {
+                                            isCurrent -> DarkBackground
+                                            isPassed -> NeonRedLight
+                                            else -> TextSecondary
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Hero Next Trade Amount Display
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF0F172A),
+                        border = BorderStroke(1.dp, if (activeStep.stepNumber == 1) NeonGreen.copy(alpha = 0.5f) else AccentAmber.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 12.dp, horizontal = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = if (activeStep.stepNumber == 1) NeonGreenDim else AccentAmber.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = if (activeStep.stepNumber == 1) "বেস ট্রেড (ধাপ ১/৭)" else "রিকভারি মোড (ধাপ ${activeStep.stepNumber}/৭)",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (activeStep.stepNumber == 1) NeonGreenLight else AccentAmber,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "সেশন উইন: $sessionWinCount টি",
+                                    fontSize = 9.sp,
+                                    color = TextMuted
+                                )
+                            }
+
+                            // Big Trade Amount
+                            Text(
+                                text = "$${activeStep.tradeAmount}.00",
+                                fontSize = 34.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (activeStep.stepNumber == 1) NeonGreen else AccentAmber
+                            )
+
+                            // Payout & Net Profit Breakdown
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "৯৫% উইন রিটার্ন: $${String.format(Locale.US, "%.2f", activeStep.payoutReturn)}",
                                     fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
                                     color = TextSecondary
                                 )
                                 Text(
-                                    text = "+$${String.format(Locale.US, "%.2f", dailyTarget)} / দিন",
-                                    fontSize = 11.sp,
+                                    text = "নিট লাভ: +$${String.format(Locale.US, "%.2f", activeStep.netProfit)}",
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace,
                                     color = NeonGreen
                                 )
                             }
                         }
-                    } else {
-                        Text(
-                            text = "💡 ব্যালেন্স ($) এবং পার্সেন্টেজ (%) বক্সে সংখ্যা বসালে স্বয়ংক্রিয়ভাবে দৈনিক টার্গেট ও ৩০ দিনের হিসাব তৈরি হবে।",
-                            fontSize = 9.5.sp,
-                            color = AccentAmber
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. Live Step Tracker & Interactive Auto Next-Trade Advisor
-        item {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = DarkCard,
-                border = BorderStroke(1.2.dp, NeonGreen.copy(alpha = 0.6f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "২. পরবর্তী ট্রেড সাইজ অ্যাডভাইজর:",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = NeonGreenLight
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = DarkBackground,
-                            border = BorderStroke(0.5.dp, BorderStrokeLight)
-                        ) {
-                            Text(
-                                text = "ধাপ ${activeStep.stepNumber} / ৭",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                color = AccentAmber,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
                     }
 
-                    // Highlight Current Trade Amount
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = DarkSurfaceVariant,
-                        border = BorderStroke(1.dp, NeonGreen),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Text(
-                                text = "বর্তমান ট্রেড অ্যামাউন্ট:",
-                                fontSize = 10.sp,
-                                color = TextSecondary
-                            )
-                            Text(
-                                text = "$${activeStep.tradeAmount}.00",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                color = NeonGreen
-                            )
-                            Text(
-                                text = "৯৫% পে-আউটে উইন রিটার্ন: $${String.format(Locale.US, "%.2f", activeStep.payoutReturn)} | নিট লাভ: +$${String.format(Locale.US, "%.2f", activeStep.netProfit)}",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = AccentCyan
-                            )
-                        }
-                    }
-
-                    // Interactive Action Buttons
+                    // Interactive Action Buttons Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Loss Button -> Go to next step
+                        // Loss Button -> Advances to next step
                         Button(
                             onClick = {
                                 if (currentStepIndex < STANDARD_7_STEPS.size - 1) {
                                     currentStepIndex++
-                                    statusFeedback = "❌ লস হয়েছে! পরবর্তী ধাপে যান: $${STANDARD_7_STEPS[currentStepIndex].tradeAmount} (ধাপ ${currentStepIndex + 1}/৭)"
+                                    val nextStep = STANDARD_7_STEPS[currentStepIndex]
+                                    statusFeedback = "❌ লস হয়েছে! পরবর্তী রিকভারি ধাপ: $${nextStep.tradeAmount} (ধাপ ${nextStep.stepNumber}/৭)"
                                 } else {
-                                    statusFeedback = "⚠️ ৭ম ধাপ সম্পন্ন হয়েছে। মূলধন সুরক্ষার জন্য সেশনটি সাময়িক বিরতি দিন।"
+                                    statusFeedback = "⚠️ ৭ম ধাপ সম্পন্ন! মূলধন সুরক্ষার জন্য ট্রেডিং সাময়িক বিরতি দিন।"
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonRed.copy(alpha = 0.25f)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NeonRed.copy(alpha = 0.2f),
+                                contentColor = NeonRedLight
+                            ),
                             border = BorderStroke(1.dp, NeonRed),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Loss",
                                     tint = NeonRedLight,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                                 Text(
                                     text = "লস (পরের ধাপ)",
@@ -354,28 +502,33 @@ fun MoneyManagementTab(
                             }
                         }
 
-                        // Win Button -> Reset to Step 1 and record win
+                        // Win Button -> Resets to Step 1
                         Button(
                             onClick = {
                                 val profitWon = activeStep.netProfit
                                 sessionWinCount++
                                 currentStepIndex = 0
-                                statusFeedback = "✅ অভিনন্দন! ট্রেড উইন হয়েছে! আগের সমস্ত লস কভার হয়ে +$${String.format(Locale.US, "%.2f", profitWon)} নিট লাভ অর্জিত হয়েছে। ধাপ আবার $১ এ রিসেট করা হলো।"
+                                statusFeedback = "✅ ট্রেড উইন! লস কভার হয়ে +$${String.format(Locale.US, "%.2f", profitWon)} নিট লাভ অর্জিত। ধাপ $১ এ রিসেট।"
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = NeonGreen.copy(alpha = 0.25f)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = NeonGreen.copy(alpha = 0.25f),
+                                contentColor = NeonGreenLight
+                            ),
                             border = BorderStroke(1.dp, NeonGreen),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Win",
                                     tint = NeonGreenLight,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                                 Text(
                                     text = "উইন (রিসেট $১)",
@@ -387,125 +540,44 @@ fun MoneyManagementTab(
                         }
                     }
 
+                    // Live Status Feedback Alert
                     if (statusFeedback != null) {
-                        Text(
-                            text = statusFeedback ?: "",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (statusFeedback?.contains("✅") == true) NeonGreenLight else AccentAmber
-                        )
-                    }
-                }
-            }
-        }
-
-        // 4. Complete 7-Step Recovery Table
-        item {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = DarkCard,
-                border = BorderStroke(1.dp, BorderStrokeLight),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = "৩. ৭-ধাপ রিকভারি ম্যাট্রিক্স টেবিল:",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-
-                    // Table Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(DarkSurfaceVariant, RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 5.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("ধাপ", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = TextSecondary, modifier = Modifier.weight(0.7f))
-                        Text("ট্রেড", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = TextSecondary, modifier = Modifier.weight(0.9f))
-                        Text("জমা লস", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = TextSecondary, modifier = Modifier.weight(1.0f))
-                        Text("রিটার্ন", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = TextSecondary, modifier = Modifier.weight(1.0f))
-                        Text("নিট লাভ", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = NeonGreenLight, modifier = Modifier.weight(1.1f))
-                    }
-
-                    // Table Rows
-                    STANDARD_7_STEPS.forEach { step ->
-                        val isCurrent = step.stepNumber == activeStep.stepNumber
                         Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (isCurrent) NeonGreen.copy(alpha = 0.15f) else DarkBackground,
+                            shape = RoundedCornerShape(6.dp),
+                            color = DarkBackground,
                             border = BorderStroke(
-                                width = if (isCurrent) 1.dp else 0.5.dp,
-                                color = if (isCurrent) NeonGreen else BorderStrokeLight
+                                0.5.dp,
+                                if (statusFeedback?.contains("✅") == true) NeonGreen else AccentAmber
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 6.dp, vertical = 4.5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (isCurrent) "▶ ${step.stepNumber}" else "${step.stepNumber}",
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isCurrent) NeonGreen else TextSecondary,
-                                    modifier = Modifier.weight(0.7f)
-                                )
-                                Text(
-                                    text = "$${step.tradeAmount}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White,
-                                    modifier = Modifier.weight(0.9f)
-                                )
-                                Text(
-                                    text = "$${step.cumulativeLoss}",
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = NeonRedLight,
-                                    modifier = Modifier.weight(1.0f)
-                                )
-                                Text(
-                                    text = "$${String.format(Locale.US, "%.2f", step.payoutReturn)}",
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = TextSecondary,
-                                    modifier = Modifier.weight(1.0f)
-                                )
-                                Text(
-                                    text = "+$${String.format(Locale.US, "%.2f", step.netProfit)}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = NeonGreen,
-                                    modifier = Modifier.weight(1.1f)
-                                )
-                            }
+                            Text(
+                                text = statusFeedback ?: "",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (statusFeedback?.contains("✅") == true) NeonGreenLight else AccentAmber,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            )
                         }
                     }
                 }
             }
         }
 
-        // 5. 30-Day Growth & Earning Projection Chart
+        // ==========================================
+        // 3. 30-Day Growth & Earning Projection Chart
+        // ==========================================
         item {
             Surface(
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = DarkCard,
                 border = BorderStroke(1.dp, BorderStrokeLight),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -523,22 +595,28 @@ fun MoneyManagementTab(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "৪. ৩০ দিনের আর্নিং প্রজেকশন প্ল্যান:",
-                                fontSize = 11.5.sp,
+                                text = "৩. ৩০ দিনের আর্নিং প্রজেকশন প্ল্যান",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                         }
-                        Text(
-                            text = if (userCapital > 0.0 && userPercent > 0.0) {
-                                "দৈনিক টার্গেট: $${String.format(Locale.US, "%.2f", dailyTarget)} (${String.format(Locale.US, "%.1f", userPercent)}%)"
-                            } else {
-                                "দৈনিক টার্গেট: $0.00"
-                            },
-                            fontSize = 9.5.sp,
-                            color = if (dailyTarget > 0.0) NeonGreen else AccentAmber,
-                            fontWeight = FontWeight.SemiBold
-                        )
+
+                        // Toggle Milestone vs Full View
+                        Surface(
+                            onClick = { showAll30Days = !showAll30Days },
+                            shape = RoundedCornerShape(6.dp),
+                            color = DarkSurfaceVariant,
+                            border = BorderStroke(0.5.dp, BorderStrokeLight)
+                        ) {
+                            Text(
+                                text = if (showAll30Days) "মাইলস্টোন ভিউ" else "সব ৩০ দিন দেখুন",
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentCyan,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
                     }
 
                     // 30 Days Summary Cards
@@ -552,18 +630,18 @@ fun MoneyManagementTab(
                     ) {
                         // Starting Capital
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = DarkSurfaceVariant,
                             border = BorderStroke(0.5.dp, BorderStrokeLight),
                             modifier = Modifier.weight(1f)
                         ) {
                             Column(
-                                modifier = Modifier.padding(6.dp),
+                                modifier = Modifier.padding(8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text("শুরুর ক্যাপিটাল", fontSize = 8.5.sp, color = TextMuted)
                                 Text(
-                                    text = "$${String.format(Locale.US, "%.2f", userCapital)}",
+                                    text = "$${String.format(Locale.US, "%.0f", userCapital)}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -573,20 +651,21 @@ fun MoneyManagementTab(
 
                         // Projected Balance after 30 days
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = DarkSurfaceVariant,
                             border = BorderStroke(0.8.dp, NeonGreen.copy(alpha = 0.6f)),
                             modifier = Modifier.weight(1.3f)
                         ) {
                             Column(
-                                modifier = Modifier.padding(6.dp),
+                                modifier = Modifier.padding(8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("৩০ দিন পর আনুমানিক ব্যালেন্স", fontSize = 8.5.sp, color = TextMuted)
+                                Text("৩০ দিন পর ব্যালেন্স", fontSize = 8.5.sp, color = TextMuted)
                                 Text(
                                     text = "$${String.format(Locale.US, "%.2f", finalProjectedBalance)}",
-                                    fontSize = 13.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
                                     color = NeonGreen
                                 )
                             }
@@ -594,18 +673,18 @@ fun MoneyManagementTab(
 
                         // Net Profit
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = DarkSurfaceVariant,
                             border = BorderStroke(0.5.dp, BorderStrokeLight),
                             modifier = Modifier.weight(1f)
                         ) {
                             Column(
-                                modifier = Modifier.padding(6.dp),
+                                modifier = Modifier.padding(8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("মোট আনুমানিক লাভ", fontSize = 8.5.sp, color = TextMuted)
+                                Text("মোট লাভ (+${String.format(Locale.US, "%.0f", roiPercent)}%)", fontSize = 8.5.sp, color = TextMuted)
                                 Text(
-                                    text = "+$${String.format(Locale.US, "%.2f", totalProfit)}",
+                                    text = "+$${String.format(Locale.US, "%.0f", totalProfit)}",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AccentCyan
@@ -614,26 +693,24 @@ fun MoneyManagementTab(
                         }
                     }
 
-                    // Scrollable 30 Days Breakdown List
-                    Text(
-                        text = "দিনভিত্তিক বিস্তারিত হিসাব (Day 1 - Day 30):",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextSecondary
-                    )
+                    // Days List (Filtered based on showAll30Days toggle)
+                    val displayedDays = if (showAll30Days) {
+                        (1..30).toList()
+                    } else {
+                        listOf(1, 5, 10, 15, 20, 25, 30)
+                    }
 
-                    // Complete 30 Days Breakdown List (Scroll to view Day 1 to Day 30)
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        (1..30).forEach { day ->
+                        displayedDays.forEach { day ->
                             val startBal = userCapital + ((day - 1) * dailyTarget)
                             val endBal = userCapital + (day * dailyTarget)
                             val isMilestone = day % 5 == 0 || day == 30
 
                             Surface(
-                                shape = RoundedCornerShape(4.dp),
+                                shape = RoundedCornerShape(5.dp),
                                 color = when {
                                     day == 30 -> NeonGreen.copy(alpha = 0.15f)
                                     isMilestone -> DarkSurfaceVariant
@@ -652,7 +729,7 @@ fun MoneyManagementTab(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        .padding(horizontal = 8.dp, vertical = 5.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -667,20 +744,20 @@ fun MoneyManagementTab(
                                         }
                                     )
                                     Text(
-                                        text = "শুরু: $${String.format(Locale.US, "%.2f", startBal)}",
+                                        text = "শুরু: $${String.format(Locale.US, "%.1f", startBal)}",
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace,
                                         color = TextMuted
                                     )
                                     Text(
-                                        text = "প্রফিট: +$${String.format(Locale.US, "%.2f", dailyTarget)}",
+                                        text = "লাভ: +$${String.format(Locale.US, "%.1f", dailyTarget)}",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         fontFamily = FontFamily.Monospace,
                                         color = NeonGreenLight
                                     )
                                     Text(
-                                        text = "দিন শেষে: $${String.format(Locale.US, "%.2f", endBal)}",
+                                        text = "শেষ: $${String.format(Locale.US, "%.1f", endBal)}",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
